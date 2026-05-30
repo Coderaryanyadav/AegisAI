@@ -58,12 +58,14 @@ graph TD
 
 1. **Python**: Python 3.11+ (Fully tested and compliant on Python 3.14.5)
 2. **Ollama**: Download and install [Ollama](https://ollama.com/) locally.
-3. **Local LLM Model**: Pull a model of choice. E.g.
+3. **Local LLM Model**: Pull a model of choice. We recommend `qwen3:8b`:
    ```bash
    ollama pull qwen3:8b
    ```
 
-### Installation
+### Quick Startup (Recommended)
+
+Aegis Legal AI is equipped with **self-bootstrapping startup scripts** for both Windows and macOS/Linux. These scripts automatically verify your Python installation, create a virtual environment (`venv`), install/upgrade dependencies, and perform port collision checks before starting the services.
 
 1. **Clone the Repository**:
    ```bash
@@ -71,36 +73,31 @@ graph TD
    cd AegisAI
    ```
 
-2. **Initialize Virtual Environment**:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-
-3. **Install Requirements**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Add Local Keys**:
-   Aegis automatically generates a secure Fernet key and writes it to `.env` on first startup if not specified. If you want to specify a key manually:
-   ```bash
-   echo "ENCRYPTION_KEY=your-url-safe-32-byte-base64-key" > .env
-   ```
-
----
-
-## 🚦 Running the Application
-
-Launch the entire suite with the automated startup script:
-
-```bash
-./start.sh
-```
+2. **Launch the Application**:
+   * **macOS / Linux**:
+     ```bash
+     chmod +x start.sh
+     ./start.sh
+     ```
+   * **Windows**:
+     Double-click `start.bat` or run it in Command Prompt:
+     ```cmd
+     start.bat
+     ```
 
 The script will launch:
 * 🌐 **FastAPI Server**: `http://127.0.0.1:8000` (Swagger docs at `/docs`)
 * ⚖️ **Streamlit Client**: `http://127.0.0.1:8501`
+
+*Aegis automatically generates a secure Fernet encryption key and writes it to `.env` on first startup if not specified.*
+
+### Alternative Manual Installation
+If you prefer to set up the environment manually:
+1. `python3 -m venv venv`
+2. `source venv/bin/activate` (or `venv\Scripts\activate` on Windows)
+3. `pip install -r requirements.txt`
+4. Run Backend: `uvicorn legal_ai.main:app --port 8000`
+5. Run Frontend: `streamlit run legal_ai/app/frontend.py`
 
 ### Default Sign-In Credentials
 * **Email**: `admin@legalai.local`
@@ -115,3 +112,42 @@ We maintain strict verification logic for database operations, hashing, encrypti
 ```bash
 python3 -m pytest
 ```
+
+---
+
+## 🔍 Troubleshooting & FAQ
+
+### 1. `Ollama service is not running` or `Model qwen3:8b not found`
+- **Solution**: Make sure you have downloaded the Ollama app from [ollama.com](https://ollama.com) and that the application is running (you should see the Ollama icon in your taskbar/menubar).
+- To pull the recommended model, open a terminal window and run:
+  ```bash
+  ollama pull qwen3:8b
+  ```
+- If you run a different model (e.g. `llama3`), Aegis will dynamically fall back to it, but `qwen3:8b` is highly recommended for structured legal drafting.
+
+### 2. `Port 8000` or `Port 8501` already in use
+- **Solution**: This happens if another service (or a previous session of Aegis) is already running on those ports.
+- On **macOS/Linux**, find and terminate the process:
+  ```bash
+  lsof -i :8000
+  kill -9 <PID>
+  ```
+- On **Windows**, terminate any uvicorn or python server tasks:
+  ```cmd
+  taskkill /F /IM python.exe
+  ```
+
+### 3. Database is locked / Resetting database
+- Aegis stores document metadata, users, and audit trails in a local SQLite file: `data/legal_ai.db`.
+- If you ever need to reset the system database or start fresh, simply delete the `data/legal_ai.db` file. Aegis will automatically recreate a fresh database and seed the default administrator account on the next startup.
+
+### 4. Binary package errors during `pip install` (e.g. greenlet, bcrypt)
+- **Solution**: Ensure your Python installation is up to date, and you have development build tools installed.
+- On **macOS**, ensure Xcode Command Line Tools are installed:
+  ```bash
+  xcode-select --install
+  ```
+- On **Linux (Ubuntu/Debian)**:
+  ```bash
+  sudo apt-get install python3-dev build-essential
+  ```

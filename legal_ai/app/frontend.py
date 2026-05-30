@@ -289,12 +289,95 @@ def fetch_audit_logs():
         st.error(f"Failed to fetch audit trail: {e}")
     return []
 
+# ----------------- SYSTEM STATUS DIAGNOSTICS -----------------
+def check_system_status() -> Dict[str, Any]:
+    status_data = {
+        "backend": False,
+        "database": "failed",
+        "ollama": False,
+        "model_pulled": False,
+        "model_name": "qwen3:8b"
+    }
+    # 1. Check Backend & DB
+    try:
+        r = requests.get(f"{API_URL}/api/health", timeout=1.5)
+        if r.status_code == 200:
+            res = r.json()
+            status_data["backend"] = True
+            status_data["database"] = res.get("database", "failed")
+            status_data["model_name"] = res.get("llm_model", "qwen3:8b")
+    except Exception:
+        pass
+        
+    # 2. Check Ollama & Model presence
+    try:
+        ollama_url = "http://127.0.0.1:11434"
+        r_ollama = requests.get(f"{ollama_url}/api/tags", timeout=1.5)
+        if r_ollama.status_code == 200:
+            status_data["ollama"] = True
+            tags = r_ollama.json().get("models", [])
+            model_names = []
+            for m in tags:
+                name = m.get("name", "")
+                model_names.append(name)
+                if ":" in name:
+                    model_names.append(name.split(":")[0])
+            target = status_data["model_name"]
+            target_base = target.split(":")[0] if ":" in target else target
+            status_data["model_pulled"] = any(target in m or target_base in m for m in model_names)
+    except Exception:
+        pass
+        
+    return status_data
+
+def render_diagnostics_sidebar(status_data: Dict[str, Any]):
+    st.markdown("<p style='color: #475569; font-size:0.75rem; font-weight:600; text-transform:uppercase; margin-top: 25px; margin-bottom: 8px;'>System Health</p>", unsafe_allow_html=True)
+    
+    # 1. Backend
+    b_color = "🟢" if status_data["backend"] else "🔴"
+    b_text = "API Service"
+    st.markdown(f"<div style='font-size:0.85rem; display:flex; align-items:center; gap:8px; margin-bottom:4px;'>{b_color} {b_text}</div>", unsafe_allow_html=True)
+    
+    # 2. Database
+    db_color = "🟢" if status_data["database"] == "connected" else "🔴"
+    db_text = "Vault Database"
+    st.markdown(f"<div style='font-size:0.85rem; display:flex; align-items:center; gap:8px; margin-bottom:4px;'>{db_color} {db_text}</div>", unsafe_allow_html=True)
+    
+    # 3. Ollama
+    o_color = "🟢" if status_data["ollama"] else "🔴"
+    o_text = "Ollama Inference"
+    st.markdown(f"<div style='font-size:0.85rem; display:flex; align-items:center; gap:8px; margin-bottom:4px;'>{o_color} {o_text}</div>", unsafe_allow_html=True)
+    
+    # 4. Model
+    m_color = "🟢" if status_data["model_pulled"] else "🔴"
+    m_text = f"LLM: {status_data['model_name']}"
+    st.markdown(f"<div style='font-size:0.85rem; display:flex; align-items:center; gap:8px; margin-bottom:8px;'>{m_color} {m_text}</div>", unsafe_allow_html=True)
+    
+    # Quick fix message if anything is red
+    if not (status_data["backend"] and status_data["ollama"] and status_data["model_pulled"]):
+        st.markdown("<div style='margin-top:10px; padding:10px; background:rgba(239, 68, 68, 0.08); border:1px solid rgba(239, 68, 68, 0.2); border-radius:8px; font-size:0.75rem; color:#f87171;'><strong>Diagnostic Alerts:</strong><br/>", unsafe_allow_html=True)
+        if not status_data["backend"]:
+            st.markdown("- Run start script (./start.sh or start.bat)<br/>", unsafe_allow_html=True)
+        if not status_data["ollama"]:
+            st.markdown("- Start Ollama desktop application<br/>", unsafe_allow_html=True)
+        elif not status_data["model_pulled"]:
+            st.markdown(f"- Run: <code>ollama pull {status_data['model_name']}</code> in terminal<br/>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
 # Force verify token on reload if present
 if st.session_state.token:
     load_user_profile()
 
+status_data = check_system_status()
+
 # ----------------- LOGIN RENDERER -----------------
 if not st.session_state.token:
+    # Render sidebar with system status even on login page
+    with st.sidebar:
+        st.markdown("<h2 style='margin-bottom: 2px;'><span class='accent-gradient'>AEGIS</span> AI</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='color:#64748b; font-size:0.8rem; margin-top:0;'>Authentication Required</p>", unsafe_allow_html=True)
+        render_diagnostics_sidebar(status_data)
+        
     st.markdown("<h1 style='text-align: center; margin-top: 80px; font-size: 3rem;'>⚖️ <span class='accent-gradient'>AEGIS</span> LEGAL AI</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 1.1rem; margin-bottom: 40px;'>Local, Airtight, and Secure Legal Reasoning Suite</p>", unsafe_allow_html=True)
     
@@ -355,7 +438,10 @@ with st.sidebar:
         
     choice = st.radio("Navigation Menu", nav_options, label_visibility="collapsed")
     
-    st.markdown("<div style='position: fixed; bottom: 20px; width: 200px;'>", unsafe_allow_html=True)
+    # Render Diagnostics in sidebar for authenticated session
+    render_diagnostics_sidebar(status_data)
+    
+    st.markdown("<div style='margin-top: 30px;'>", unsafe_allow_html=True)
     st.markdown("---")
     if st.button("Terminate Session", use_container_width=True, type="secondary"):
         st.session_state.token = None
