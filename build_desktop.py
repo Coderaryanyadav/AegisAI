@@ -22,10 +22,15 @@ def compile_app():
         "chromadb.telemetry.opentelemetry"
     ]
     
+    import streamlit
+    streamlit_dir = os.path.dirname(streamlit.__file__)
+    streamlit_static = os.path.join(streamlit_dir, "static")
+    
     # Data assets to pack (uses target delimiter for OS)
     separator = ";" if sys.platform == "win32" else ":"
     data_files = [
-        f"legal_ai{separator}legal_ai"
+        f"legal_ai{separator}legal_ai",
+        f"{streamlit_static}{separator}streamlit/static"
     ]
     
     # Arguments list for PyInstaller compiler
@@ -33,7 +38,9 @@ def compile_app():
         "desktop_app.py",
         "--name=AegisLegalAI",
         "--windowed",  # Headless native window, no terminal console
-        "--clean"
+        "--copy-metadata=streamlit",
+        "--clean",
+        "--noconfirm"
     ]
     
     for hi in hidden_imports:

@@ -66,6 +66,10 @@ if __name__ == "__main__":
         sys.exit(0)
 
     elif "--frontend" in sys.argv:
+        # Force Streamlit to run headlessly without ever opening a browser window
+        os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
+        os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+        
         # Run Streamlit Frontend programmatically
         import streamlit.web.bootstrap as bootstrap
         frontend_path = get_resource_path(os.path.join("legal_ai", "app", "frontend.py"))
