@@ -2,8 +2,23 @@ import os
 import sys
 import warnings
 
+# Force Streamlit to run headlessly without ever opening a browser window
+os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
+os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+# Also force global development mode to false via env variable as an extra layer
+os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
+
 # Suppress all deprecation and runtime warnings globally
 warnings.simplefilter("ignore")
+
+# Define user-writable paths for logs and debug info
+USER_HOME = os.path.expanduser("~")
+LOG_DIR = os.path.join(USER_HOME, ".aegis_legal_ai", "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+backend_log_path = os.path.join(LOG_DIR, "backend_server.log")
+frontend_log_path = os.path.join(LOG_DIR, "frontend_server.log")
+debug_paths_path = os.path.join(LOG_DIR, "debug_paths.txt")
 
 # Ensure absolute imports work in both developer and compiled standalone mode
 if hasattr(sys, '_MEIPASS'):
@@ -43,11 +58,12 @@ def start_backend():
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 0  # SW_HIDE
 
-    # Launch ourselves with --backend flag
+    # Redirect to log files to capture debugging tracebacks safely in user home directory
+    log_f = open(backend_log_path, "w")
     return subprocess.Popen(
         [sys.executable, __file__, "--backend"] if not getattr(sys, 'frozen', False) else [sys.executable, "--backend"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_f,
+        stderr=log_f,
         startupinfo=startupinfo
     )
 
@@ -59,11 +75,12 @@ def start_frontend():
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 0  # SW_HIDE
 
-    # Launch ourselves with --frontend flag
+    # Redirect to log files to capture debugging tracebacks safely in user home directory
+    log_f = open(frontend_log_path, "w")
     return subprocess.Popen(
         [sys.executable, __file__, "--frontend"] if not getattr(sys, 'frozen', False) else [sys.executable, "--frontend"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_f,
+        stderr=log_f,
         startupinfo=startupinfo
     )
 
@@ -77,9 +94,27 @@ if __name__ == "__main__":
         sys.exit(0)
 
     elif "--frontend" in sys.argv:
+        # Force Streamlit to run in production mode to mount static asset routes
+        from streamlit import config
+        config.set_option("global.developmentMode", False)
+
+        # Monkeypatch Streamlit static folder resolution for PyInstaller zip-package environment
+        import streamlit.file_util as streamlit_file_util
+        streamlit_file_util.get_static_dir = lambda: get_resource_path(os.path.join("streamlit", "static"))
+
+        # Debug paths
+        try:
+            with open(debug_paths_path, "w") as debug_f:
+                debug_f.write(f"sys._MEIPASS: {getattr(sys, '_MEIPASS', 'None')}\n")
+                debug_f.write(f"get_static_dir(): {streamlit_file_util.get_static_dir()}\n")
+                debug_f.write(f"exists: {os.path.exists(streamlit_file_util.get_static_dir())}\n")
+        except Exception as debug_e:
+            pass
+
         # Force Streamlit to run headlessly without ever opening a browser window
-        os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
-        os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+        config.set_option("server.headless", True)
+        config.set_option("browser.gatherUsageStats", False)
+        config.set_option("server.port", 8501)
         
         # Run Streamlit Frontend programmatically
         import streamlit.web.bootstrap as bootstrap
