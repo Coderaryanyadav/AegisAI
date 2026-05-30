@@ -1,5 +1,9 @@
 import os
 import sys
+import warnings
+
+# Suppress all deprecation and runtime warnings globally
+warnings.simplefilter("ignore")
 
 # Ensure absolute imports work in both developer and compiled standalone mode
 if hasattr(sys, '_MEIPASS'):

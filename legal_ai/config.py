@@ -1,4 +1,9 @@
 import os
+import warnings
+
+# Suppress all deprecation and runtime warnings globally at runtime
+warnings.simplefilter("ignore")
+
 from pathlib import Path
 from dotenv import load_dotenv
 
