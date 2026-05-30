@@ -1,133 +1,200 @@
-/* Premium Glassmorphism & Dark Mode Style System for Legal AI Assistant */
+/* Monochromatic & Editorial Lawyer Theme Style System for Aegis Legal AI */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
 
 /* Main app container styling */
 .stApp {
-    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-    color: #f1f5f9;
-    font-family: 'Inter', sans-serif;
+    background-color: #0d0d0d !important;
+    color: #e5e5e5 !important;
+    font-family: 'Inter', sans-serif !important;
 }
 
-/* Typography styles */
+/* Sidebar styling overrides for pure dark editorial split */
+section[data-testid="stSidebar"] {
+    background-color: #050505 !important;
+    border-right: 1px solid #1f1f1f !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+    padding-top: 2rem !important;
+}
+
+/* Typography styles with serif titles for classic lawyer feel */
 h1, h2, h3, h4, h5, h6 {
-    font-family: 'Outfit', sans-serif;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-family: 'Playfair Display', serif !important;
+    font-weight: 500 !important;
+    color: #ffffff !important;
+    letter-spacing: -0.01em !important;
 }
 
 h1 {
-    color: #e2e8f0;
-    background: linear-gradient(to right, #38bdf8, #818cf8);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 1.5rem !important;
+    font-size: 2.3rem !important;
+    border-bottom: 1px solid #1f1f1f !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 1.8rem !important;
 }
 
-/* Glassmorphism containers */
-div[data-testid="stVerticalBlock"] > div {
-    border-radius: 12px;
+h2 {
+    font-size: 1.7rem !important;
+    margin-top: 1.5rem !important;
+    margin-bottom: 1rem !important;
 }
 
-/* Custom card component classes (injected via st.markdown) */
+h3 {
+    font-size: 1.3rem !important;
+}
+
+/* Custom flat card components */
 .legal-card {
-    background: rgba(30, 41, 59, 0.45);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
-    padding: 24px;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+    background-color: #121212 !important;
+    border: 1px solid #222222 !important;
+    border-radius: 4px !important;
+    padding: 24px !important;
+    margin-bottom: 20px !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
 }
 
 .legal-card-header {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: #38bdf8;
-    margin-bottom: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    padding-bottom: 8px;
+    font-family: 'Playfair Display', serif !important;
+    font-size: 1.3rem !important;
+    font-weight: 500 !important;
+    color: #ffffff !important;
+    margin-bottom: 12px !important;
+    border-bottom: 1px solid #222222 !important;
+    padding-bottom: 8px !important;
 }
 
-/* Badge highlights */
+/* Monochromatic badge highlights */
 .badge-admin {
-    background-color: rgba(239, 68, 68, 0.15);
-    color: #f87171;
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    border: 1px solid #ffffff !important;
+    padding: 2px 8px !important;
+    border-radius: 2px !important;
+    font-size: 0.7rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.05em !important;
 }
 
 .badge-lawyer {
-    background-color: rgba(56, 189, 248, 0.15);
-    color: #38bdf8;
-    border: 1px solid rgba(56, 189, 248, 0.3);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
+    background-color: transparent !important;
+    color: #ffffff !important;
+    border: 1px solid #ffffff !important;
+    padding: 2px 8px !important;
+    border-radius: 2px !important;
+    font-size: 0.7rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.05em !important;
 }
 
 .badge-auditor {
-    background-color: rgba(168, 85, 247, 0.15);
-    color: #c084fc;
-    border: 1px solid rgba(168, 85, 247, 0.3);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
+    background-color: transparent !important;
+    color: #888888 !important;
+    border: 1px solid #333333 !important;
+    padding: 2px 8px !important;
+    border-radius: 2px !important;
+    font-size: 0.7rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.05em !important;
 }
 
-/* Streamlit button custom styles */
+/* Streamlit button custom overrides - High contrast flat styling */
 button[kind="primary"] {
-    background: linear-gradient(90deg, #6366f1 0%, #3b82f6 100%) !important;
-    border: none !important;
-    color: white !important;
+    background-color: #ffffff !important;
+    border: 1px solid #ffffff !important;
+    color: #000000 !important;
     font-weight: 600 !important;
     padding: 0.5rem 1.5rem !important;
-    border-radius: 8px !important;
-    transition: all 0.3s ease !important;
+    border-radius: 2px !important;
+    transition: all 0.2s ease !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    font-size: 0.75rem !important;
 }
 
 button[kind="primary"]:hover {
-    box-shadow: 0 0 15px rgba(99, 102, 241, 0.4) !important;
-    transform: translateY(-1px) !important;
+    background-color: #e5e5e5 !important;
+    border-color: #e5e5e5 !important;
+    color: #000000 !important;
+}
+
+button[kind="secondary"] {
+    background-color: transparent !important;
+    border: 1px solid #333333 !important;
+    color: #cccccc !important;
+    font-weight: 500 !important;
+    border-radius: 2px !important;
+    transition: all 0.2s ease !important;
+    font-size: 0.8rem !important;
+}
+
+button[kind="secondary"]:hover {
+    border-color: #ffffff !important;
+    color: #ffffff !important;
 }
 
 /* Chat bubble styling overrides */
 div[data-testid="stChatMessage"] {
-    background: rgba(30, 41, 59, 0.3) !important;
-    border: 1px solid rgba(255, 255, 255, 0.05) !important;
-    border-radius: 12px !important;
-    padding: 15px !important;
-    margin-bottom: 10px !important;
+    background-color: #121212 !important;
+    border: 1px solid #222222 !important;
+    border-radius: 2px !important;
+    padding: 18px !important;
+    margin-bottom: 12px !important;
 }
 
 div[data-testid="stChatMessageUser"] {
-    background: rgba(99, 102, 241, 0.15) !important;
-    border: 1px solid rgba(99, 102, 241, 0.25) !important;
+    background-color: #1a1a1a !important;
+    border: 1px solid #333333 !important;
 }
 
 /* Custom Citation display */
 .citation-container {
-    background: rgba(15, 23, 42, 0.6);
-    border-left: 3px solid #818cf8;
-    padding: 10px 15px;
-    margin: 8px 0;
-    border-radius: 0 8px 8px 0;
-    font-size: 0.9rem;
+    background-color: #080808 !important;
+    border-left: 2px solid #ffffff !important;
+    padding: 12px 16px !important;
+    margin: 10px 0 !important;
+    border-radius: 0px !important;
+    font-size: 0.9rem !important;
+    border-top: 1px solid #222222 !important;
+    border-right: 1px solid #222222 !important;
+    border-bottom: 1px solid #222222 !important;
 }
 
 .citation-title {
-    font-weight: 600;
-    color: #a5b4fc;
-    margin-bottom: 4px;
+    font-family: 'Playfair Display', serif !important;
+    font-weight: 500 !important;
+    color: #ffffff !important;
+    margin-bottom: 4px !important;
 }
 
 .citation-text {
-    color: #94a3b8;
-    font-style: italic;
+    color: #a3a3a3 !important;
+    font-style: italic !important;
+}
+
+/* Inputs, textareas, selectboxes style overrides to match dark theme */
+div[data-baseweb="input"], div[data-baseweb="textarea"] {
+    background-color: #121212 !important;
+    border: 1px solid #333333 !important;
+    border-radius: 2px !important;
+}
+
+div[data-baseweb="input"]:focus-within, div[data-baseweb="textarea"]:focus-within {
+    border-color: #ffffff !important;
+}
+
+/* Minimal Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: #0d0d0d;
+}
+::-webkit-scrollbar-thumb {
+    background: #262626;
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #404040;
 }

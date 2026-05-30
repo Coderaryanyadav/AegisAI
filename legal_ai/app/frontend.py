@@ -38,9 +38,9 @@ def load_css():
     
     /* Document list list item */
     .doc-row {{
-        background: rgba(30, 41, 59, 0.3);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 12px;
+        background: #121212;
+        border: 1px solid #222222;
+        border-radius: 4px;
         padding: 16px 20px;
         margin-bottom: 10px;
         display: flex;
@@ -49,8 +49,8 @@ def load_css():
         transition: all 0.2s ease;
     }}
     .doc-row:hover {{
-        background: rgba(30, 41, 59, 0.5);
-        border-color: rgba(99, 102, 241, 0.2);
+        background: #181818;
+        border-color: #444444;
     }}
     .doc-info {{
         display: flex;
@@ -58,46 +58,47 @@ def load_css():
         gap: 15px;
     }}
     .doc-icon {{
-        font-size: 1.5rem;
-        background: rgba(99, 102, 241, 0.1);
-        color: #818cf8;
+        font-size: 1.4rem;
+        background: #1a1a1a;
+        color: #ffffff;
         width: 42px;
         height: 42px;
-        border-radius: 8px;
+        border-radius: 2px;
         display: flex;
         align-items: center;
         justify-content: center;
+        border: 1px solid #333333;
     }}
     .doc-title {{
         font-weight: 500;
-        color: #e2e8f0;
+        color: #ffffff;
         font-size: 0.95rem;
     }}
     .doc-meta {{
         font-size: 0.8rem;
-        color: #64748b;
+        color: #888888;
         margin-top: 2px;
     }}
     
     /* Metric Cards */
     .metric-card {{
-        background: rgba(30, 41, 59, 0.45);
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        background: #121212;
+        border: 1px solid #222222;
         padding: 20px;
-        border-radius: 16px;
+        border-radius: 4px;
         text-align: left;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     }}
     .metric-value {{
-        font-size: 2rem;
-        font-weight: 700;
-        color: #f8fafc;
-        font-family: 'Outfit', sans-serif;
+        font-size: 2.2rem;
+        font-weight: 500;
+        color: #ffffff;
+        font-family: 'Playfair Display', serif;
         margin-top: 5px;
     }}
     .metric-label {{
         font-size: 0.85rem;
-        color: #94a3b8;
+        color: #a3a3a3;
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }}
@@ -105,33 +106,33 @@ def load_css():
     /* Pill Status badges */
     .pill-status {{
         padding: 4px 10px;
-        border-radius: 20px;
-        font-size: 0.75rem;
+        border-radius: 2px;
+        font-size: 0.7rem;
         font-weight: 600;
         text-transform: uppercase;
+        letter-spacing: 0.05em;
     }}
     .pill-processed {{
-        background: rgba(16, 185, 129, 0.12);
-        color: #34d399;
-        border: 1px solid rgba(16, 185, 129, 0.2);
+        background: transparent;
+        color: #ffffff;
+        border: 1px solid #ffffff;
     }}
     .pill-processing {{
-        background: rgba(245, 158, 11, 0.12);
-        color: #fbbf24;
-        border: 1px solid rgba(245, 158, 11, 0.2);
+        background: transparent;
+        color: #888888;
+        border: 1px solid #444444;
     }}
     .pill-failed {{
-        background: rgba(239, 68, 68, 0.12);
+        background: transparent;
         color: #f87171;
-        border: 1px solid rgba(239, 68, 68, 0.2);
+        border: 1px solid #ef4444;
     }}
     
     /* Accent text */
     .accent-gradient {{
-        background: linear-gradient(to right, #38bdf8, #818cf8);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-weight: 700;
+        color: #ffffff;
+        font-weight: 600;
+        letter-spacing: 0.02em;
     }}
     </style>
     """, unsafe_allow_html=True)
