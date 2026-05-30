@@ -64,10 +64,10 @@ def test_document_chunking():
     assert len(page_2_chunks) > 0
     assert "page two" in page_2_chunks[0]["content"]
 
-def test_chroma_vector_store():
+def test_chroma_vector_store(temp_data_dir):
     """Verify ChromaDB initialization, chunk indexing, search, filtering, and deletion."""
-    # Initialize store (creates a collection)
-    store = LocalVectorStore()
+    # Initialize store (creates a collection isolated in test temp dir)
+    store = LocalVectorStore(persist_dir=os.path.join(temp_data_dir, "test_chromadb"), collection_name="test_collection")
     
     # Prepare dummy chunks
     chunks = [

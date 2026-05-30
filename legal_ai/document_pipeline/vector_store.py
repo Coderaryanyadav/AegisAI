@@ -4,9 +4,10 @@ from typing import List, Dict, Any, Optional
 from legal_ai.config import CHROMA_DB_DIR, EMBEDDINGS_MODEL_NAME
 
 class LocalVectorStore:
-    def __init__(self):
+    def __init__(self, persist_dir: Optional[str] = None, collection_name: str = "legal_documents_v1"):
         # Create a persistent local client for ChromaDB
-        self.client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
+        path_dir = persist_dir or str(CHROMA_DB_DIR)
+        self.client = chromadb.PersistentClient(path=path_dir)
         
         # Load local SentenceTransformer model
         self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
@@ -15,7 +16,7 @@ class LocalVectorStore:
         
         # Retrieve or create collection
         self.collection = self.client.get_or_create_collection(
-            name="legal_documents_v1",
+            name=collection_name,
             embedding_function=self.embedding_fn
         )
 
