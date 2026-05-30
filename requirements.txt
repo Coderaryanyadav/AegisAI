@@ -3,7 +3,6 @@ uvicorn
 streamlit
 sqlalchemy
 cryptography
-passlib
 bcrypt
 pyjwt
 pydantic

@@ -8,6 +8,7 @@ data/
 backend.log
 backend.pid
 .env
+scratch/
 
 # Python caching
 __pycache__/
