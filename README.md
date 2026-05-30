@@ -52,20 +52,9 @@ graph TD
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Running the Standalone Desktop Application
 
-### Prerequisites
-
-1. **Python**: Python 3.11+ (Fully tested and compliant on Python 3.14.5)
-2. **Ollama**: Download and install [Ollama](https://ollama.com/) locally.
-3. **Local LLM Model**: Pull a model of choice. We recommend `qwen3:8b`:
-   ```bash
-   ollama pull qwen3:8b
-   ```
-
-### Quick Startup (Recommended)
-
-Aegis Legal AI is equipped with **self-bootstrapping startup scripts** for both Windows and macOS/Linux. These scripts automatically verify your Python installation, create a virtual environment (`venv`), install/upgrade dependencies, and perform port collision checks before starting the services.
+Aegis Legal AI is equipped with **self-bootstrapping startup scripts** for both Windows and macOS/Linux. These scripts automatically verify your Python installation, setup a virtual environment (`venv`), install dependencies, and run the native desktop launcher `desktop_app.py` in one-click.
 
 1. **Clone the Repository**:
    ```bash
@@ -73,7 +62,7 @@ Aegis Legal AI is equipped with **self-bootstrapping startup scripts** for both 
    cd AegisAI
    ```
 
-2. **Launch the Application**:
+2. **Launch the Desktop Software**:
    * **macOS / Linux**:
      ```bash
      chmod +x start.sh
@@ -85,23 +74,33 @@ Aegis Legal AI is equipped with **self-bootstrapping startup scripts** for both 
      start.bat
      ```
 
-The script will launch:
-* 🌐 **FastAPI Server**: `http://127.0.0.1:8000` (Swagger docs at `/docs`)
-* ⚖️ **Streamlit Client**: `http://127.0.0.1:8501`
+This will automatically launch the **Aegis Legal AI Suite** in its own standalone desktop window. **No web browser tabs or command prompt windows will pop open.**
 
-*Aegis automatically generates a secure Fernet encryption key and writes it to `.env` on first startup if not specified.*
+---
 
-### Alternative Manual Installation
-If you prefer to set up the environment manually:
-1. `python3 -m venv venv`
-2. `source venv/bin/activate` (or `venv\Scripts\activate` on Windows)
-3. `pip install -r requirements.txt`
-4. Run Backend: `uvicorn legal_ai.main:app --port 8000`
-5. Run Frontend: `streamlit run legal_ai/app/frontend.py`
+## 📦 Building Standalone Installers for Clients
 
-### Default Sign-In Credentials
+If you want to package the app into a standalone installer (`.dmg` or `.exe`) that you can directly install on your client's computer (with no Python dependencies required on their end):
+
+### 1. Compile the App Bundle
+Run the compiler script to package python and all dependencies:
+```bash
+python build_desktop.py
+```
+This produces the compiled app under `dist/AegisLegalAI.app` (macOS) or `dist/AegisLegalAI/AegisLegalAI.exe` (Windows).
+
+### 2. Package the Installer
+* **macOS**: Package the app into a double-clickable drag-and-drop disk image installer:
+  ```bash
+  ./package_dmg.sh
+  ```
+  This creates `dist/AegisLegalAI.dmg`.
+* **Windows**: Use **Inno Setup** with the provided `installer.iss` file to compile a standard setup wizard `dist/AegisLegalAI_Setup.exe`.
+
+### Default Sign-In Credentials (Demo)
 * **Email**: `admin@legalai.local`
 * **Password**: `adminpassword123`
+* *(You can also click the "Autofill Demo" button on the secure sign-in page to fill this in one click)*
 
 ---
 

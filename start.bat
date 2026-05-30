@@ -94,20 +94,7 @@ if %errorlevel% eq 0 (
     echo ----------------------------------------------------------
 )
 
-:: Start FastAPI Backend in a minimized command window to isolate PID
-echo [*] Starting FastAPI Backend on http://127.0.0.1:8000...
-start "Aegis_Backend_Server" /Min python -m uvicorn legal_ai.main:app --host 127.0.0.1 --port 8000
-
-:: Sleep for 3 seconds to let backend initialize
-timeout /t 3 /nobreak >nul
-
-:: Launch Streamlit Frontend in foreground
-echo [*] Launching Streamlit Desktop UI on http://127.0.0.1:8501...
+:: Launch Standalone Desktop Application
+echo [*] Launching Aegis Legal AI Standalone Desktop Application...
 echo ----------------------------------------------------------
-python -m streamlit run legal_ai\app\frontend.py --server.port 8501 --server.address 127.0.0.1
-
-:: Clean up uvicorn backend on exit (identifies process by window title)
-echo.
-echo [*] Stopping uvicorn backend server...
-taskkill /FI "WINDOWTITLE eq Aegis_Backend_Server" /T /F >nul 2>&1
-echo [*] Done.
+python desktop_app.py
