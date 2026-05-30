@@ -11,7 +11,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     role = Column(String, default="lawyer", nullable=False)  # admin, lawyer, auditor
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
 
     # Relationships
     documents = relationship("Document", back_populates="owner")
@@ -27,7 +27,7 @@ class Document(Base):
     file_path = Column(String, nullable=False)                         # Absolute path on local filesystem
     file_hash = Column(String, index=True, nullable=True)             # SHA256 checksum to prevent duplicate processing
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    uploaded_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    uploaded_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
     status = Column(String, default="pending", nullable=False)         # pending, processing, processed, failed
 
     # Relationships
@@ -44,7 +44,7 @@ class AuditLog(Base):
     target_type = Column(String, nullable=True)                         # USER, DOCUMENT, SYSTEM
     target_id = Column(String, nullable=True)                           # ID of the target resource
     details = Column(String, nullable=True)                             # JSON string or text details of action
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
     ip_address = Column(String, nullable=True)
 
     # Relationships
