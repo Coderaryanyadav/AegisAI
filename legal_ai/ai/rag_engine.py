@@ -20,7 +20,8 @@ class LegalRAGEngine:
         self, 
         question: str, 
         document_ids: Optional[List[int]] = None,
-        limit: int = 5
+        limit: int = 5,
+        model_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Retrieves relevant documents, compiles context, queries Ollama,
@@ -75,7 +76,8 @@ class LegalRAGEngine:
         # Query Ollama
         answer = self.ollama.generate(
             prompt=prompt,
-            system_prompt=LEGAL_ASSISTANT_SYSTEM_PROMPT
+            system_prompt=LEGAL_ASSISTANT_SYSTEM_PROMPT,
+            model_override=model_name
         )
         
         return {
@@ -83,7 +85,7 @@ class LegalRAGEngine:
             "citations": citations
         }
 
-    def audit_contract(self, document_id: int) -> Dict[str, Any]:
+    def audit_contract(self, document_id: int, model_name: Optional[str] = None) -> Dict[str, Any]:
         """
         Runs a contract audit by retrieving all chunks of a specific document,
         joining them, and executing the auditing prompt against Ollama in JSON format.
@@ -108,7 +110,8 @@ class LegalRAGEngine:
         response_str = self.ollama.generate(
             prompt=prompt,
             system_prompt=CONTRACT_AUDIT_SYSTEM_PROMPT,
-            json_format=True
+            json_format=True,
+            model_override=model_name
         )
         
         try:
@@ -126,7 +129,8 @@ class LegalRAGEngine:
     def draft_document(
         self, 
         instructions: str, 
-        reference_doc_ids: Optional[List[int]] = None
+        reference_doc_ids: Optional[List[int]] = None,
+        model_name: Optional[str] = None
     ) -> str:
         """
         Drafts a new legal document using user instructions and optional context
@@ -157,10 +161,11 @@ class LegalRAGEngine:
         
         return self.ollama.generate(
             prompt=prompt,
-            system_prompt=LEGAL_DRAFTING_SYSTEM_PROMPT
+            system_prompt=LEGAL_DRAFTING_SYSTEM_PROMPT,
+            model_override=model_name
         )
 
-    def generate_timeline(self, document_ids: List[int]) -> str:
+    def generate_timeline(self, document_ids: List[int], model_name: Optional[str] = None) -> str:
         """
         Analyze documents to construct a chronological event timeline.
         """
@@ -186,5 +191,6 @@ class LegalRAGEngine:
         
         return self.ollama.generate(
             prompt=prompt,
-            system_prompt=LEGAL_ASSISTANT_SYSTEM_PROMPT
+            system_prompt=LEGAL_ASSISTANT_SYSTEM_PROMPT,
+            model_override=model_name
         )

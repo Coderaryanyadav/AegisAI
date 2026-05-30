@@ -235,11 +235,12 @@ def delete_document(doc_id):
         st.error(f"Connection error: {e}")
     return False
 
-def upload_document(uploaded_file):
+def upload_document(uploaded_file, chunk_size: int = 500, chunk_overlap: int = 50):
     headers = {"Authorization": f"Bearer {st.session_state.token}"}
     files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+    params = {"chunk_size": chunk_size, "chunk_overlap": chunk_overlap}
     try:
-        response = requests.post(f"{API_URL}/api/docs/upload", headers=headers, files=files)
+        response = requests.post(f"{API_URL}/api/docs/upload", headers=headers, files=files, params=params)
         if response.status_code == 202:
             st.toast("Ingestion triggered successfully.", icon="🚀")
             return True
@@ -249,9 +250,9 @@ def upload_document(uploaded_file):
         st.error(f"Upload error: {e}")
     return False
 
-def query_chat(query: str, doc_ids: List[int]):
+def query_chat(query: str, doc_ids: List[int], model_name: Optional[str] = None):
     headers = {"Authorization": f"Bearer {st.session_state.token}"}
-    payload = {"query": query, "document_ids": doc_ids}
+    payload = {"query": query, "document_ids": doc_ids, "model_name": model_name}
     try:
         response = requests.post(f"{API_URL}/api/chat", headers=headers, json=payload)
         if response.status_code == 200:
@@ -262,10 +263,11 @@ def query_chat(query: str, doc_ids: List[int]):
         st.error(f"Error querying AI engine: {e}")
     return None
 
-def audit_contract(doc_id: int):
+def audit_contract(doc_id: int, model_name: Optional[str] = None):
     headers = {"Authorization": f"Bearer {st.session_state.token}"}
+    params = {"model_name": model_name} if model_name else {}
     try:
-        response = requests.post(f"{API_URL}/api/audit-contract/{doc_id}", headers=headers)
+        response = requests.post(f"{API_URL}/api/audit-contract/{doc_id}", headers=headers, params=params)
         if response.status_code == 200:
             return response.json()
         else:
@@ -274,9 +276,9 @@ def audit_contract(doc_id: int):
         st.error(f"Error running contract audit: {e}")
     return None
 
-def generate_draft(instructions: str, ref_doc_ids: List[int]):
+def generate_draft(instructions: str, ref_doc_ids: List[int], model_name: Optional[str] = None):
     headers = {"Authorization": f"Bearer {st.session_state.token}"}
-    payload = {"instructions": instructions, "reference_doc_ids": ref_doc_ids}
+    payload = {"instructions": instructions, "reference_doc_ids": ref_doc_ids, "model_name": model_name}
     try:
         response = requests.post(f"{API_URL}/api/draft-document", headers=headers, json=payload)
         if response.status_code == 200:
@@ -317,6 +319,43 @@ def generate_docx_bytes(content: str) -> bytes:
     except Exception as e:
         st.error(f"Error generating Word document: {e}")
         return b""
+
+def generate_chat_transcript(history: List[Dict[str, Any]]) -> str:
+    """Convert chat history transcript to clean, readable plain text."""
+    lines = []
+    lines.append("="*60)
+    lines.append("           AEGIS LEGAL AI - CHAT HISTORY TRANSCRIPT")
+    lines.append("="*60)
+    lines.append(f"Generated at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append("-"*60)
+    lines.append("")
+    
+    for idx, chat in enumerate(history):
+        role_label = "ATTORNEY (USER)" if chat["role"] == "user" else "AEGIS AI ASSISTANT"
+        lines.append(f"[{idx+1}] {role_label}:")
+        lines.append(chat["content"])
+        if chat.get("citations"):
+            lines.append("\n  Citations / Sources referenced:")
+            for cit in chat["citations"]:
+                lines.append(f"  - Document: {cit['original_name']} (Page {cit['page_number']})")
+                lines.append(f"    Excerpt: \"{cit['content']}\"")
+        lines.append("-" * 40)
+        lines.append("")
+        
+    return "\n".join(lines)
+
+def fetch_local_ollama_models() -> List[str]:
+    """Retrieve locally pulled model tags from the local Ollama instance."""
+    try:
+        r = requests.get("http://127.0.0.1:11434/api/tags", timeout=1.0)
+        if r.status_code == 200:
+            models = r.json().get("models", [])
+            names = [m.get("name") for m in models if m.get("name")]
+            if names:
+                return sorted(list(set(names)))
+    except Exception:
+        pass
+    return ["qwen3:8b"]
 
 def fetch_audit_logs():
     headers = {"Authorization": f"Bearer {st.session_state.token}"}
@@ -415,27 +454,76 @@ if not st.session_state.token:
     with st.sidebar:
         st.markdown("<h2 style='margin-bottom: 2px;'><span class='accent-gradient'>AEGIS</span> AI</h2>", unsafe_allow_html=True)
         st.markdown("<p style='color:#64748b; font-size:0.8rem; margin-top:0;'>Authentication Required</p>", unsafe_allow_html=True)
+        
+        # Model Selector dropdown
+        ollama_models = fetch_local_ollama_models()
+        default_model = "qwen3:8b"
+        if default_model not in ollama_models and ollama_models:
+            default_model = ollama_models[0]
+        if "selected_model" not in st.session_state:
+            st.session_state.selected_model = default_model
+            
+        st.markdown("<p style='color: #475569; font-size:0.75rem; font-weight:600; text-transform:uppercase; margin-bottom: 8px; margin-top:15px;'>Active Reasoner Model</p>", unsafe_allow_html=True)
+        selected_idx = 0
+        if st.session_state.selected_model in ollama_models:
+            selected_idx = ollama_models.index(st.session_state.selected_model)
+            
+        def on_model_change_login():
+            st.session_state.selected_model = st.session_state.model_selector_login_widget
+            
+        st.selectbox(
+            "Active LLM", 
+            options=ollama_models, 
+            index=selected_idx, 
+            key="model_selector_login_widget",
+            on_change=on_model_change_login,
+            label_visibility="collapsed"
+        )
+        
         render_diagnostics_sidebar(status_data)
         
     st.markdown("<h1 style='text-align: center; margin-top: 80px; font-size: 3rem;'>⚖️ <span class='accent-gradient'>AEGIS</span> LEGAL AI</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 1.1rem; margin-bottom: 40px;'>Local, Airtight, and Secure Legal Reasoning Suite</p>", unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns([1, 1.3, 1])
+    col1, col2, col3 = st.columns([1, 1.4, 1])
     with col2:
         st.markdown('<div class="legal-card" style="padding: 30px;">', unsafe_allow_html=True)
-        st.markdown("<h4 style='margin-top: 0; color: #f8fafc;'>Secure Console Sign-in</h4>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #64748b; font-size:0.85rem;'>Verify your firm credentials. All connections are fully local.</p>", unsafe_allow_html=True)
+        st.markdown("<h4 style='margin-top: 0; color: #f8fafc; font-family:\'Playfair Display\', serif;'>🔒 Secure Console Sign-in</h4>", unsafe_allow_html=True)
         
-        login_email = st.text_input("User Email", key="login_email", placeholder="attorney@firm.local")
-        login_password = st.text_input("Security Key / Password", type="password", key="login_password")
+        # Display platform security highlights
+        st.markdown("""
+        <div style="font-size: 0.8rem; color: #888888; border-bottom: 1px solid #222; padding-bottom: 12px; margin-bottom: 20px; line-height: 1.4;">
+            🛡️ <strong>Airtight Architecture</strong>: 100% Local Reasoning (no internet required)<br/>
+            🔒 <strong>AES-256 Storage</strong>: Case documents encrypted dynamically at rest<br/>
+            📋 <strong>Immutable Trail</strong>: Immutable relational logging tracking system queries
+        </div>
+        """, unsafe_allow_html=True)
         
-        st.markdown("<div style='margin-top: 20px;'>", unsafe_allow_html=True)
-        if st.button("Authenticate Session", type="primary", use_container_width=True):
-            if login_email and login_password:
-                login_user(login_email, login_password)
-            else:
-                st.warning("All authentication fields are required.")
-        st.markdown("</div>", unsafe_allow_html=True)
+        if "login_email_val" not in st.session_state:
+            st.session_state.login_email_val = ""
+        if "login_password_val" not in st.session_state:
+            st.session_state.login_password_val = ""
+            
+        login_email = st.text_input("User Email", value=st.session_state.login_email_val, key="login_email_widget", placeholder="attorney@firm.local")
+        login_password = st.text_input("Security Key / Password", value=st.session_state.login_password_val, type="password", key="login_password_widget")
+        
+        st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+        col_submit, col_demo = st.columns([1.2, 1])
+        with col_submit:
+            if st.button("Authenticate Session", type="primary", use_container_width=True):
+                if login_email and login_password:
+                    st.session_state.login_email_val = login_email
+                    st.session_state.login_password_val = login_password
+                    login_user(login_email, login_password)
+                else:
+                    st.warning("Credentials are required.")
+        with col_demo:
+            if st.button("Autofill Demo", type="secondary", use_container_width=True):
+                st.session_state.login_email_val = "admin@legalai.local"
+                st.session_state.login_password_val = "adminpassword123"
+                st.session_state.login_email_widget = "admin@legalai.local"
+                st.session_state.login_password_widget = "adminpassword123"
+                st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
@@ -466,7 +554,32 @@ with st.sidebar:
     st.markdown(f"<p style='color:#64748b; font-size:0.8rem; margin-top:0;'>Firm Member: <code>{st.session_state.email}</code></p>", unsafe_allow_html=True)
     st.markdown(f"<div style='margin-bottom: 20px;'>{role_badges.get(st.session_state.role, '')}</div>", unsafe_allow_html=True)
     
-    st.markdown("<p style='color: #475569; font-size:0.75rem; font-weight:600; text-transform:uppercase; margin-bottom: 8px;'>Workspace Views</p>", unsafe_allow_html=True)
+    # Active Reasoner Model selector
+    ollama_models = fetch_local_ollama_models()
+    default_model = "qwen3:8b"
+    if default_model not in ollama_models and ollama_models:
+        default_model = ollama_models[0]
+    if "selected_model" not in st.session_state:
+        st.session_state.selected_model = default_model
+        
+    st.markdown("<p style='color: #475569; font-size:0.75rem; font-weight:600; text-transform:uppercase; margin-bottom: 8px; margin-top:15px;'>Active Reasoner Model</p>", unsafe_allow_html=True)
+    selected_idx = 0
+    if st.session_state.selected_model in ollama_models:
+        selected_idx = ollama_models.index(st.session_state.selected_model)
+        
+    def on_model_change_main():
+        st.session_state.selected_model = st.session_state.model_selector_main_widget
+        
+    st.selectbox(
+        "Active LLM", 
+        options=ollama_models, 
+        index=selected_idx, 
+        key="model_selector_main_widget",
+        on_change=on_model_change_main,
+        label_visibility="collapsed"
+    )
+    
+    st.markdown("<p style='color: #475569; font-size:0.75rem; font-weight:600; text-transform:uppercase; margin-bottom: 8px; margin-top:15px;'>Workspace Views</p>", unsafe_allow_html=True)
     
     # Navigation list depending on role
     nav_options = ["📁 Dashboard", "💬 Chat & Q&A", "🔍 Contract Auditor", "✍️ Document Drafting"]
@@ -545,10 +658,14 @@ if choice == "📁 Dashboard":
         
         uploaded_file = st.file_uploader("Select PDF or Plain TXT Document:", type=["pdf", "txt"], label_visibility="collapsed")
         
+        with st.expander("⚙️ Advanced Ingestion Settings", expanded=False):
+            chunk_size = st.slider("Chunk Size (characters)", min_value=200, max_value=2000, value=500, step=50)
+            chunk_overlap = st.slider("Chunk Overlap (characters)", min_value=20, max_value=500, value=50, step=10)
+        
         st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
         if st.button("Trigger Vault Ingestion", type="primary", use_container_width=True, disabled=(uploaded_file is None)):
             if uploaded_file is not None:
-                if upload_document(uploaded_file):
+                if upload_document(uploaded_file, chunk_size=chunk_size, chunk_overlap=chunk_overlap):
                     st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
@@ -633,6 +750,15 @@ elif choice == "💬 Chat & Q&A":
                                     <div class="citation-text">"...{cit['content']}..."</div>
                                 </div>
                                 """, unsafe_allow_html=True)
+            if st.session_state.chat_history:
+                st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+                transcript_txt = generate_chat_transcript(st.session_state.chat_history)
+                st.download_button(
+                    label="📥 Download Chat History (.txt)",
+                    data=transcript_txt,
+                    file_name=f"aegis_chat_history_{int(time.time())}.txt",
+                    mime="text/plain"
+                )
                                 
         # Chat input at bottom
         if user_query := st.chat_input("Ask a question about the case documents..."):
@@ -645,7 +771,7 @@ elif choice == "💬 Chat & Q&A":
                 # Fetch query from AI backend
                 with st.chat_message("assistant"):
                     with st.spinner("Analyzing case text chunks..."):
-                        response = query_chat(user_query, selected_doc_ids)
+                        response = query_chat(user_query, selected_doc_ids, model_name=st.session_state.selected_model)
                         if response:
                             answer = response["answer"]
                             citations = response["citations"]
@@ -690,7 +816,7 @@ elif choice == "🔍 Contract Auditor":
         
         if trigger_audit:
             with st.spinner("Extracting governing clauses and analyzing risk profiles..."):
-                audit_report = audit_contract(selected_doc_id)
+                audit_report = audit_contract(selected_doc_id, model_name=st.session_state.selected_model)
                 if audit_report:
                     if "error" in audit_report:
                         st.error(audit_report["error"])
@@ -833,7 +959,7 @@ elif choice == "✍️ Document Drafting":
                 st.warning("Please provide drafting instructions first.")
             else:
                 with st.spinner("AI drafting document structure..."):
-                    drafted_text = generate_draft(instructions, ref_doc_ids)
+                    drafted_text = generate_draft(instructions, ref_doc_ids, model_name=st.session_state.selected_model)
                     st.session_state.drafted_content = drafted_text
                     st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)

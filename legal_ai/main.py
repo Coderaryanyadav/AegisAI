@@ -184,16 +184,27 @@ def health_check(db: Session = Depends(get_db)):
 class ChatRequest(BaseModel):
     query: str
     document_ids: Optional[List[int]] = None
+    model_name: Optional[str] = None
 
 class DraftRequest(BaseModel):
     instructions: str
     reference_doc_ids: Optional[List[int]] = None
+    model_name: Optional[str] = None
 
 class TimelineRequest(BaseModel):
     document_ids: List[int]
+    model_name: Optional[str] = None
 
 # Document processing background helper
-def process_document_background(doc_id: int, original_name: str, file_path: str, user_id: int, user_email: str):
+def process_document_background(
+    doc_id: int, 
+    original_name: str, 
+    file_path: str, 
+    user_id: int, 
+    user_email: str,
+    chunk_size: int = 500,
+    chunk_overlap: int = 50
+):
     db = next(get_db())
     try:
         crud.update_document_status(db, doc_id, "processing")
@@ -203,7 +214,7 @@ def process_document_background(doc_id: int, original_name: str, file_path: str,
         text = ingestor.extract_text(file_path, original_name)
         
         # 2. Chunk text
-        chunker = LegalDocumentChunker()
+        chunker = LegalDocumentChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         doc_metadata = {"id": doc_id, "original_name": original_name}
         chunks = chunker.split_document(text, doc_metadata)
         
@@ -245,6 +256,8 @@ def upload_document(
     request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    chunk_size: int = 500,
+    chunk_overlap: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(RoleChecker(allowed_roles=["admin", "lawyer"]))
 ):
@@ -302,7 +315,9 @@ def upload_document(
         file.filename, 
         file_path, 
         current_user.id,
-        current_user.email
+        current_user.email,
+        chunk_size,
+        chunk_overlap
     )
     
     return {
@@ -399,7 +414,7 @@ def chat_rag(
         doc_ids = [d_id for d_id in doc_ids if d_id in allowed_docs]
         
     engine = LegalRAGEngine()
-    result = engine.query(question=chat_req.query, document_ids=doc_ids)
+    result = engine.query(question=chat_req.query, document_ids=doc_ids, model_name=chat_req.model_name)
     
     # Log audit
     crud.create_audit_log(
@@ -422,6 +437,7 @@ def chat_rag(
 def audit_contract_document(
     request: Request,
     doc_id: int,
+    model_name: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(RoleChecker(allowed_roles=["admin", "lawyer"]))
 ):
@@ -434,7 +450,7 @@ def audit_contract_document(
         raise HTTPException(status_code=403, detail="Not authorized to access this document")
         
     engine = LegalRAGEngine()
-    audit_report = engine.audit_contract(doc_id)
+    audit_report = engine.audit_contract(doc_id, model_name)
     
     # Log audit event
     crud.create_audit_log(
@@ -464,7 +480,11 @@ def draft_document_from_instructions(
         doc_ids = [d_id for d_id in doc_ids if d_id in allowed_docs]
         
     engine = LegalRAGEngine()
-    drafted_text = engine.draft_document(instructions=draft_req.instructions, reference_doc_ids=doc_ids)
+    drafted_text = engine.draft_document(
+        instructions=draft_req.instructions, 
+        reference_doc_ids=doc_ids, 
+        model_name=draft_req.model_name
+    )
     
     crud.create_audit_log(
         db,
@@ -495,7 +515,7 @@ def generate_event_timeline(
         doc_ids = [d_id for d_id in doc_ids if d_id in allowed_docs]
         
     engine = LegalRAGEngine()
-    timeline_md = engine.generate_timeline(document_ids=doc_ids)
+    timeline_md = engine.generate_timeline(document_ids=doc_ids, model_name=timeline_req.model_name)
     
     crud.create_audit_log(
         db,
