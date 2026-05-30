@@ -5,6 +5,11 @@ import os
 import time
 import pandas as pd
 from typing import List, Dict, Any, Optional
+from io import BytesIO
+try:
+    import docx
+except ImportError:
+    docx = None
 
 # Set page configuration with dark theme default
 st.set_page_config(
@@ -279,6 +284,39 @@ def generate_draft(instructions: str, ref_doc_ids: List[int]):
     except Exception as e:
         st.error(f"Drafting error: {e}")
     return ""
+
+def generate_docx_bytes(content: str) -> bytes:
+    """Convert text content to a structured .docx file and return raw bytes."""
+    bio = BytesIO()
+    try:
+        if not docx:
+            # Fallback if docx module is missing
+            st.error("python-docx is not loaded. Cannot export DOCX.")
+            return b""
+        doc = docx.Document()
+        # Add basic styled title
+        doc.add_heading("Legal Document Draft", level=0)
+        
+        # Split text into paragraphs and add them
+        paragraphs = content.split("\n")
+        for p in paragraphs:
+            trimmed = p.strip()
+            if not trimmed:
+                continue
+            if trimmed.startswith("### "):
+                doc.add_heading(trimmed.replace("### ", ""), level=2)
+            elif trimmed.startswith("## "):
+                doc.add_heading(trimmed.replace("## ", ""), level=1)
+            elif trimmed.startswith("# "):
+                doc.add_heading(trimmed.replace("# ", ""), level=0)
+            else:
+                doc.add_paragraph(trimmed)
+        
+        doc.save(bio)
+        return bio.getvalue()
+    except Exception as e:
+        st.error(f"Error generating Word document: {e}")
+        return b""
 
 def fetch_audit_logs():
     headers = {"Authorization": f"Bearer {st.session_state.token}"}
@@ -670,6 +708,45 @@ elif choice == "🔍 Contract Auditor":
                         </div>
                         """, unsafe_allow_html=True)
                         
+                        # Compute compliance checklist
+                        standard_clauses = [
+                            {"name": "Governing Law", "key_terms": ["governing", "jurisdiction", "applicable law"]},
+                            {"name": "Termination", "key_terms": ["termination", "terminate", "expiration"]},
+                            {"name": "Indemnity", "key_terms": ["indemnity", "indemnification", "hold harmless"]},
+                            {"name": "Confidentiality", "key_terms": ["confidential", "confidentiality", "non-disclosure"]},
+                            {"name": "Force Majeure", "key_terms": ["force majeure", "act of god", "unforeseen event"]},
+                            {"name": "Severability", "key_terms": ["severability", "severable", "invalidity"]}
+                        ]
+                        
+                        found_categories = []
+                        clauses_list = audit_report.get("clauses_extracted", [])
+                        for cl in clauses_list:
+                            cat = str(cl.get("clause_type", "")).lower()
+                            summary = str(cl.get("summary", "")).lower()
+                            found_categories.append(cat)
+                            found_categories.append(summary)
+                            
+                        missing_list = audit_report.get("missing_clauses", [])
+                        missing_categories = [str(m.get("clause_type", "")).lower() for m in missing_list]
+                        
+                        # Generate HTML Checklist
+                        checklist_html = '<div class="legal-card" style="padding: 20px;">'
+                        checklist_html += '<h4 style="margin-top:0; margin-bottom:15px; color:#ffffff; font-family:\'Playfair Display\', serif;">⚖️ Legal Due Diligence Checklist</h4>'
+                        checklist_html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">'
+                        
+                        for sc in standard_clauses:
+                            sc_name = sc["name"]
+                            is_missing = any(sc_name.lower() in mc for mc in missing_categories)
+                            is_found = any(sc_name.lower() in fc for fc in found_categories) or any(any(kt in fc for kt in sc["key_terms"]) for fc in found_categories)
+                            
+                            if is_found and not is_missing:
+                                checklist_html += f'<div style="font-size:0.9rem; display:flex; align-items:center; gap:8px; color:#ffffff;">🟢 <strong>{sc_name}</strong>: Identified</div>'
+                            else:
+                                checklist_html += f'<div style="font-size:0.9rem; display:flex; align-items:center; gap:8px; color:#888888;">🔴 <span style="text-decoration: line-through;">{sc_name}</span>: Omitted</div>'
+                                
+                        checklist_html += '</div></div>'
+                        st.markdown(checklist_html, unsafe_allow_html=True)
+                        
                         # Tabs
                         tab_clauses, tab_risks, tab_gaps = st.tabs(["📌 Clauses Extracted", "⚠️ Risk Log", "❌ Compliance Gaps"])
                         
@@ -769,14 +846,25 @@ elif choice == "✍️ Document Drafting":
             
             # Simple spacing
             st.markdown("<br>", unsafe_allow_html=True)
-            
-            st.download_button(
-                label="📥 Download Draft (.txt)",
-                data=st.session_state.drafted_content,
-                file_name="legal_draft_output.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
+            col_txt, col_docx = st.columns(2)
+            with col_txt:
+                st.download_button(
+                    label="📥 Download Draft (.txt)",
+                    data=st.session_state.drafted_content,
+                    file_name="legal_draft_output.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+            with col_docx:
+                docx_bytes = generate_docx_bytes(st.session_state.drafted_content)
+                if docx_bytes:
+                    st.download_button(
+                        label="📥 Download Draft (.docx)",
+                        data=docx_bytes,
+                        file_name="legal_draft_output.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True
+                    )
         else:
             st.info("The drafted legal document will appear here after clicking 'Generate Legal Draft'.")
 
