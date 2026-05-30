@@ -27,7 +27,7 @@ class Document(Base):
     file_path = Column(String, nullable=False)                         # Absolute path on local filesystem
     file_hash = Column(String, index=True, nullable=True)             # SHA256 checksum to prevent duplicate processing
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    uploaded_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
+    uploaded_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False, index=True)
     status = Column(String, default="pending", nullable=False)         # pending, processing, processed, failed
 
     # Relationships
@@ -40,11 +40,11 @@ class AuditLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)    # Null if system or pre-login action
     user_email = Column(String, nullable=True)                          # Cached email for record retention
-    action = Column(String, nullable=False)                             # USER_LOGIN, DOCUMENT_UPLOAD, RAG_QUERY, etc.
+    action = Column(String, nullable=False, index=True)                             # USER_LOGIN, DOCUMENT_UPLOAD, RAG_QUERY, etc.
     target_type = Column(String, nullable=True)                         # USER, DOCUMENT, SYSTEM
     target_id = Column(String, nullable=True)                           # ID of the target resource
     details = Column(String, nullable=True)                             # JSON string or text details of action
-    timestamp = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
+    timestamp = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False, index=True)
     ip_address = Column(String, nullable=True)
 
     # Relationships

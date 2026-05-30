@@ -157,6 +157,8 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "drafted_content" not in st.session_state:
     st.session_state.drafted_content = ""
+if "timeline_content" not in st.session_state:
+    st.session_state.timeline_content = ""
 
 # Helper to verify token and retrieve profile on reload
 def load_user_profile():
@@ -287,6 +289,17 @@ def generate_draft(instructions: str, ref_doc_ids: List[int], model_name: Option
         st.error(f"Drafting error: {e}")
     return ""
 
+def generate_timeline_gui(doc_ids: List[int], model_name: Optional[str] = None) -> str:
+    headers = {"Authorization": f"Bearer {st.session_state.token}"}
+    payload = {"document_ids": doc_ids, "model_name": model_name}
+    try:
+        response = requests.post(f"{API_URL}/api/timeline", headers=headers, json=payload)
+        if response.status_code == 200:
+            return response.json().get("timeline_markdown", "")
+    except Exception as e:
+        st.error(f"Timeline error: {e}")
+    return ""
+
 def generate_docx_bytes(content: str) -> bytes:
     """Convert text content to a structured .docx file and return raw bytes."""
     bio = BytesIO()
@@ -344,6 +357,7 @@ def generate_chat_transcript(history: List[Dict[str, Any]]) -> str:
         
     return "\n".join(lines)
 
+@st.cache_data(ttl=10)
 def fetch_local_ollama_models() -> List[str]:
     """Retrieve locally pulled model tags from the local Ollama instance."""
     try:
@@ -582,7 +596,7 @@ with st.sidebar:
     st.markdown("<p style='color: #475569; font-size:0.75rem; font-weight:600; text-transform:uppercase; margin-bottom: 8px; margin-top:15px;'>Workspace Views</p>", unsafe_allow_html=True)
     
     # Navigation list depending on role
-    nav_options = ["📁 Dashboard", "💬 Chat & Q&A", "🔍 Contract Auditor", "✍️ Document Drafting"]
+    nav_options = ["📁 Dashboard", "💬 Chat & Q&A", "🔍 Contract Auditor", "✍️ Document Drafting", "📅 Case Timeline"]
     if st.session_state.role in ["admin", "auditor"]:
         nav_options.append("📋 Security Audit Trail")
     if st.session_state.role == "admin":
@@ -993,6 +1007,53 @@ elif choice == "✍️ Document Drafting":
                     )
         else:
             st.info("The drafted legal document will appear here after clicking 'Generate Legal Draft'.")
+
+# VIEW: CASE TIMELINE
+elif choice == "📅 Case Timeline":
+    st.markdown("<h1>Chronological Case Timeline Generator</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#94a3b8;'>Analyze case documents and automatically construct an interactive chronological timeline of events, dates, and sign-offs.</p>", unsafe_allow_html=True)
+    
+    col_input, col_output = st.columns([1.1, 1.5])
+    
+    with col_input:
+        st.markdown('<div class="legal-card">', unsafe_allow_html=True)
+        st.markdown("<h4 style='margin-top:0; color:#f8fafc;'>Timeline Scope</h4>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size:0.85rem; color:#64748b; margin-top:0;'>Select which case files the AI should scan for dates and chronological events:</p>", unsafe_allow_html=True)
+        
+        if not documents:
+            st.info("No documents uploaded. Please upload files in the Dashboard tab.")
+            selected_timeline_ids = []
+        else:
+            processed_docs = [doc for doc in documents if doc["status"] == "processed"]
+            selected_timeline_ids = []
+            for doc in processed_docs:
+                if st.checkbox(doc["original_name"], value=True, key=f"timeline_scope_{doc['id']}"):
+                    selected_timeline_ids.append(doc["id"])
+                    
+        st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
+        if st.button("Generate Case Timeline", type="primary", use_container_width=True, disabled=not selected_timeline_ids):
+            with st.spinner("AI parsing timelines and extracting dates..."):
+                timeline_md = generate_timeline_gui(selected_timeline_ids, model_name=st.session_state.selected_model)
+                st.session_state.timeline_content = timeline_md
+                st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    with col_output:
+        st.markdown("### Chronological Timeline Output")
+        if st.session_state.timeline_content:
+            st.markdown(st.session_state.timeline_content)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.download_button(
+                label="📥 Download Timeline (.md)",
+                data=st.session_state.timeline_content,
+                file_name="case_timeline_output.md",
+                mime="text/markdown",
+                use_container_width=True
+            )
+        else:
+            st.info("The generated chronological event timeline will appear here after clicking 'Generate Case Timeline'.")
 
 # VIEW: SECURITY AUDIT TRAIL
 elif choice == "📋 Security Audit Trail":
