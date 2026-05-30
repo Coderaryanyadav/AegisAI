@@ -5,16 +5,26 @@ from dotenv import load_dotenv
 # Load environment variables from .env file if it exists
 load_dotenv()
 
+import sys
+
 # Base directories
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
+
+if getattr(sys, 'frozen', False):
+    # Packaged production mode: store data persistently in user's home directory
+    USER_DIR = Path(os.path.expanduser("~")) / ".aegis_legal_ai"
+else:
+    # Development mode: store data in the project workspace
+    USER_DIR = BASE_DIR
+
+DATA_DIR = USER_DIR / "data"
 ENCRYPTED_FILES_DIR = DATA_DIR / "encrypted_files"
 CHROMA_DB_DIR = DATA_DIR / "chromadb"
 
 # Create directories if they do not exist
-DATA_DIR.mkdir(exist_ok=True)
-ENCRYPTED_FILES_DIR.mkdir(exist_ok=True)
-CHROMA_DB_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+ENCRYPTED_FILES_DIR.mkdir(parents=True, exist_ok=True)
+CHROMA_DB_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configuration Variables
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR}/legal_assistant.db")

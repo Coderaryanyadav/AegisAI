@@ -16,3 +16,6 @@ python-dotenv
 pytest
 httpx
 python-docx
+pywebview
+pyinstaller
+
