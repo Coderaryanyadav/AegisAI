@@ -137,8 +137,9 @@ python3 -m pytest
   ```
 
 ### 3. Database is locked / Resetting database
-- Aegis stores document metadata, users, and audit trails in a local SQLite file: `data/legal_ai.db`.
-- If you ever need to reset the system database or start fresh, simply delete the `data/legal_ai.db` file. Aegis will automatically recreate a fresh database and seed the default administrator account on the next startup.
+- In developer mode, Aegis stores document metadata, users, and audit trails in a local SQLite file: `data/legal_assistant.db`.
+- In compiled standalone mode, client databases are located in their home directory: `~/.aegis_legal_ai/data/legal_assistant.db`.
+- If you ever need to reset the system database or start fresh, simply delete the corresponding `legal_assistant.db` file. Aegis will automatically recreate a fresh database and seed the default administrator account on the next startup.
 
 ### 4. Binary package errors during `pip install` (e.g. greenlet, bcrypt)
 - **Solution**: Ensure your Python installation is up to date, and you have development build tools installed.

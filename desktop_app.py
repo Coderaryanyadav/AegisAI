@@ -1,5 +1,12 @@
 import os
 import sys
+
+# Ensure absolute imports work in both developer and compiled standalone mode
+if hasattr(sys, '_MEIPASS'):
+    sys.path.insert(0, sys._MEIPASS)
+else:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import subprocess
 import time
 import socket

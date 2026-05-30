@@ -38,7 +38,7 @@ ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 
 # Ollama settings
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-DEFAULT_LLM_MODEL = os.getenv("OLLAMA_LLM_MODEL", "qwen2.5:7b-instruct")
+DEFAULT_LLM_MODEL = os.getenv("OLLAMA_LLM_MODEL", "qwen3:8b")
 
 # Dynamically resolve available model
 OLLAMA_LLM_MODEL = DEFAULT_LLM_MODEL
