@@ -78,6 +78,12 @@ export default function Home() {
   const [compareResults, setCompareResults] = useState<any[]>([]);
   const [isComparing, setIsComparing] = useState(false);
 
+  // Simplify Clause State
+  const [showSimplifyModal, setShowSimplifyModal] = useState(false);
+  const [simplifyClauseText, setSimplifyClauseText] = useState("");
+  const [simplifyResult, setSimplifyResult] = useState<any>(null);
+  const [isSimplifying, setIsSimplifying] = useState(false);
+
   // Drafting State
   const [templates, setTemplates] = useState<any[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
@@ -670,6 +676,33 @@ export default function Home() {
       showNotification(err.message, "error");
     } finally {
       setIsAuditing(false);
+    }
+  };
+
+  // Simplify Clause Call
+  const handleSimplifyClause = async () => {
+    if (!simplifyClauseText.trim()) {
+      showNotification("Please enter clause text to simplify", "warning");
+      return;
+    }
+    setIsSimplifying(true);
+    setSimplifyResult(null);
+    try {
+      const response = await fetchWithAuth(`${API_BASE}/api/audit/simplify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clause_text: simplifyClauseText, model_name: selectedModel })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSimplifyResult(data);
+      } else {
+        showNotification("Failed to simplify clause", "error");
+      }
+    } catch (err) {
+      showNotification(err.message, "error");
+    } finally {
+      setIsSimplifying(false);
     }
   };
 
@@ -1985,11 +2018,22 @@ export default function Home() {
                       <div key={idx} className="p-4 bg-zinc-900/50 border border-zinc-800/80 rounded-xl space-y-2">
                         <div className="flex justify-between items-center">
                           <h4 className="text-xs font-bold text-zinc-100">{risk.clause_title}</h4>
-                          <span className={`px-2 py-0.5 rounded font-mono text-[9px] border ${
-                            risk.risk_rating === "High" ? "bg-rose-950/40 border-rose-900 text-rose-400" :
-                            risk.risk_rating === "Medium" ? "bg-amber-955/40 border-amber-900 text-amber-400" :
-                            "bg-emerald-955/40 border-emerald-900 text-emerald-400"
-                          }`}>{risk.risk_rating.toUpperCase()} RISK</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                setSimplifyClauseText(risk.summary || "");
+                                setSimplifyResult(null);
+                                setShowSimplifyModal(true);
+                              }}
+                              className="px-2 py-0.5 rounded text-[9px] font-semibold bg-violet-900/40 border border-violet-700 text-violet-300 hover:bg-violet-800/60 transition"
+                              title="Simplify this clause in plain language"
+                            >✨ Simplify</button>
+                            <span className={`px-2 py-0.5 rounded font-mono text-[9px] border ${
+                              risk.risk_rating === "High" ? "bg-rose-950/40 border-rose-900 text-rose-400" :
+                              risk.risk_rating === "Medium" ? "bg-amber-955/40 border-amber-900 text-amber-400" :
+                              "bg-emerald-955/40 border-emerald-900 text-emerald-400"
+                            }`}>{risk.risk_rating.toUpperCase()} RISK</span>
+                          </div>
                         </div>
                         <p className="text-xs text-zinc-300 leading-relaxed">{risk.summary}</p>
                         <div className="text-[11px] text-zinc-400 italic bg-zinc-950/40 p-2 rounded">
@@ -2070,6 +2114,104 @@ export default function Home() {
                   </div>
                 </div>
 
+              </div>
+
+              {/* Simplify Clause Manual Input Panel */}
+              <div className="border border-violet-900/50 bg-violet-950/10 p-5 rounded-xl space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">✨</span>
+                  <h3 className="text-sm font-bold text-violet-300">Plain-Language Clause Simplifier</h3>
+                </div>
+                <p className="text-xs text-zinc-400">Paste any legal clause text below and the AI will rewrite it in clear, simple language suitable for clients.</p>
+                <textarea
+                  value={simplifyClauseText}
+                  onChange={(e) => setSimplifyClauseText(e.target.value)}
+                  placeholder="Paste clause text here..."
+                  rows={3}
+                  className="w-full p-3 text-xs rounded-lg glass-input text-zinc-200 resize-none"
+                />
+                <button
+                  onClick={() => { setSimplifyResult(null); setShowSimplifyModal(true); handleSimplifyClause(); }}
+                  disabled={isSimplifying || !simplifyClauseText.trim()}
+                  className="px-4 py-2 bg-violet-700 hover:bg-violet-600 text-white font-semibold rounded-lg text-xs transition disabled:opacity-50"
+                >
+                  {isSimplifying ? "Simplifying..." : "Simplify Clause"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* SIMPLIFY CLAUSE MODAL */}
+          {showSimplifyModal && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
+              style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+              onClick={(e) => { if (e.target === e.currentTarget) setShowSimplifyModal(false); }}
+            >
+              <div className="bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-xl p-6 space-y-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h2 className="text-base font-bold text-violet-300">✨ Clause Simplifier</h2>
+                    <p className="text-xs text-zinc-400 mt-0.5">AI-powered plain-language rewrite</p>
+                  </div>
+                  <button
+                    onClick={() => setShowSimplifyModal(false)}
+                    className="text-zinc-500 hover:text-zinc-200 text-lg leading-none transition"
+                  >✕</button>
+                </div>
+
+                {/* Input */}
+                <div>
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Original Clause</label>
+                  <textarea
+                    value={simplifyClauseText}
+                    onChange={(e) => setSimplifyClauseText(e.target.value)}
+                    placeholder="Paste or edit clause text..."
+                    rows={4}
+                    className="w-full p-3 text-xs rounded-lg glass-input text-zinc-200 resize-none"
+                  />
+                </div>
+
+                <button
+                  onClick={handleSimplifyClause}
+                  disabled={isSimplifying || !simplifyClauseText.trim()}
+                  className="w-full py-2.5 bg-violet-700 hover:bg-violet-600 text-white font-semibold rounded-lg text-xs transition disabled:opacity-50"
+                >
+                  {isSimplifying ? "Simplifying with AI..." : "✨ Simplify Now"}
+                </button>
+
+                {isSimplifying && (
+                  <div className="p-4 text-center text-xs text-violet-300 animate-pulse">AI is rewriting the clause in plain language...</div>
+                )}
+
+                {simplifyResult && !isSimplifying && (
+                  <div className="space-y-3">
+                    <div className="p-4 bg-violet-950/30 border border-violet-900/50 rounded-xl">
+                      <p className="text-[10px] font-bold text-violet-400 uppercase mb-2">Plain-Language Version</p>
+                      <p className="text-xs text-zinc-200 leading-relaxed whitespace-pre-wrap">{simplifyResult.simplified}</p>
+                    </div>
+                    {simplifyResult.key_obligations && simplifyResult.key_obligations.length > 0 && (
+                      <div className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-xl">
+                        <p className="text-[10px] font-bold text-zinc-400 uppercase mb-2">Key Obligations</p>
+                        <ul className="space-y-1">
+                          {simplifyResult.key_obligations.map((ob, i) => (
+                            <li key={i} className="text-xs text-zinc-300 flex gap-2"><span className="text-violet-400">→</span>{ob}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {simplifyResult.risk_flags && simplifyResult.risk_flags.length > 0 && (
+                      <div className="p-3 bg-rose-950/20 border border-rose-900/40 rounded-xl">
+                        <p className="text-[10px] font-bold text-rose-400 uppercase mb-2">Risk Flags</p>
+                        <ul className="space-y-1">
+                          {simplifyResult.risk_flags.map((flag, i) => (
+                            <li key={i} className="text-xs text-rose-300 flex gap-2"><span>⚠️</span>{flag}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
