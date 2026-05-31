@@ -11,7 +11,8 @@ def run_command(cmd, cwd=None):
         sys.exit(result.returncode)
 
 def compile_app():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    # Resolve base_dir to the project root (one level up from packaging/)
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     # 1. Compile Python Backend using PyInstaller
     print("\n==============================================")

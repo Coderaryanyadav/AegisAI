@@ -3,6 +3,10 @@
 
 set -e
 
+# Determine project root (one level up from packaging/)
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_DIR"
+
 APP_PATH="dist/AegisLegalAI.app"
 DMG_PATH="dist/AegisLegalAI.dmg"
 VOL_NAME="Aegis Legal AI"
@@ -11,7 +15,7 @@ echo "[*] Packaging macOS standalone app into disk image..."
 
 if [ ! -d "$APP_PATH" ]; then
     echo "[!] Error: Compiled app bundle '$APP_PATH' does not exist."
-    echo "[*] Please run 'python build_desktop.py' first to compile the app."
+    echo "[*] Please run 'python packaging/build_desktop.py' first to compile the app."
     exit 1
 fi
 

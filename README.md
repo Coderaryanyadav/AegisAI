@@ -87,18 +87,18 @@ To build a standalone installable bundle (`.dmg` or `.exe`) packaging the backen
 ### 1. Compile Backend & Frontend Assets
 Run the bundler script:
 ```bash
-python build_desktop.py
+python packaging/build_desktop.py
 ```
 This runs PyInstaller to package the FastAPI backend with its local database engines and dependencies under `dist/aegis_backend/`, compiles Next.js pages, and copies them to the Electron wrapper.
 
 ### 2. Build Platform Installers
 *   **macOS DMG**:
     ```bash
-    ./package_dmg.sh
+    ./packaging/package_dmg.sh
     ```
     This outputs the Drag-and-Drop installer at `dist_desktop/AegisAI-1.0.0-arm64.dmg`.
 *   **Windows Installer**:
-    Use **Inno Setup** with the provided `installer.iss` file to compile a setup wizard executable under `dist_desktop/`.
+    Use **Inno Setup** with the provided `packaging/installer.iss` file to compile a setup wizard executable under `dist_desktop/`.
 
 ---
 

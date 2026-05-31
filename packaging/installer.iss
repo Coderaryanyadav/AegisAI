@@ -6,7 +6,7 @@ AppName=Aegis Legal AI Suite
 AppVersion=1.0.0
 DefaultDirName={autopf}\AegisLegalAI
 DefaultGroupName=Aegis Legal AI Suite
-OutputDir=dist
+OutputDir=..\dist
 OutputBaseFilename=AegisLegalAI_Setup
 Compression=lzma
 SolidCompression=yes
@@ -22,7 +22,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\AegisLegalAI\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+Source: "..\dist\AegisLegalAI\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Aegis Legal AI"; Filename: "{app}\AegisLegalAI.exe"
