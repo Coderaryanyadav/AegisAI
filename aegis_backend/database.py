@@ -63,6 +63,8 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     role = Column(String, default="lawyer", nullable=False) # admin, lawyer, auditor
+    firm_logo = Column(Text, nullable=True) # base64 logo string
+    firm_name = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 class Client(Base):
@@ -88,6 +90,8 @@ class Matter(Base):
     opposing_advocate = Column(String, nullable=True)
     status = Column(String, default="open", nullable=False) # open, pending_hearing, closed, archived
     facts = Column(EncryptedText, nullable=True) # Transparently Encrypted case facts
+    cnr_number = Column(String, nullable=True)
+    is_locked = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     client = relationship("Client", back_populates="matters")
@@ -208,6 +212,18 @@ def init_db():
                 conn.execute(text("ALTER TABLE matters ADD COLUMN opponent_name TEXT"))
             if "opposing_advocate" not in existing_cols:
                 conn.execute(text("ALTER TABLE matters ADD COLUMN opposing_advocate TEXT"))
+            if "cnr_number" not in existing_cols:
+                conn.execute(text("ALTER TABLE matters ADD COLUMN cnr_number TEXT"))
+            if "is_locked" not in existing_cols:
+                conn.execute(text("ALTER TABLE matters ADD COLUMN is_locked INTEGER DEFAULT 0"))
+                
+            user_info = conn.execute(text("PRAGMA table_info(users)")).fetchall()
+            existing_user_cols = [row[1] for row in user_info]
+            if "firm_logo" not in existing_user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN firm_logo TEXT"))
+            if "firm_name" not in existing_user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN firm_name TEXT"))
+                
             conn.commit()
     except Exception as ex:
         print(f"Offline migrations error: {ex}")

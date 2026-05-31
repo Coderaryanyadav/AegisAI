@@ -58,6 +58,10 @@ def compile_app():
         "aegis_backend/main.py"
     ]
     
+    # Add model_bundle folder as packaged data
+    sep = ";" if sys.platform == "win32" else ":"
+    args.append(f"--add-data=aegis_backend/model_bundle{sep}aegis_backend/model_bundle")
+    
     for hi in hidden_imports:
         args.append(f"--hidden-import={hi}")
         

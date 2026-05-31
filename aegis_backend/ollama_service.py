@@ -25,8 +25,9 @@ class OllamaService:
             logger.warning(f"Failed to connect to local Ollama service: {e}")
             return []
 
-    @staticmethod
+    @classmethod
     async def generate_completion(
+        cls,
         model: str,
         prompt: str,
         system_prompt: Optional[str] = None,
@@ -34,6 +35,39 @@ class OllamaService:
         temperature: float = 0.2
     ) -> str:
         """Sends a text completion request to the local Ollama model."""
+        # Resolve to a local model fallback if the requested model is not present
+        try:
+            available = await cls.get_available_models()
+            if available and model not in available:
+                # 1. Clean comparison names
+                requested_base = model.split(":")[0].lower()
+                matched = None
+                
+                # 2. Try prefix matching (e.g. deepseek-r1:8b matches deepseek-r1)
+                for m in available:
+                    if requested_base in m.lower():
+                        matched = m
+                        break
+                
+                # 3. Fallback to any model containing common legal assistant keywords
+                if not matched:
+                    for keyword in ["qwen", "llama", "deepseek", "mistral", "phi"]:
+                        for m in available:
+                            if keyword in m.lower():
+                                matched = m
+                                break
+                        if matched:
+                            break
+                            
+                # 4. Fallback to the first available model in list
+                if not matched:
+                    matched = available[0]
+                    
+                logger.info(f"Model '{model}' not found locally. Automatically falling back to active local model: '{matched}'")
+                model = matched
+        except Exception as e:
+            logger.warning(f"Error checking available models for fallback: {e}")
+
         payload = {
             "model": model,
             "prompt": prompt,

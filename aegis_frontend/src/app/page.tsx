@@ -12,15 +12,49 @@ import {
 const API_BASE = "http://localhost:8000";
 
 // PDF export helper (jsPDF)
-const exportToPDF = (title: string, content: string) => {
+const exportToPDF = (title: string, content: string, firmName?: string, logoBase64?: string) => {
   try {
     const { jsPDF } = require("jspdf");
     const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text(title, 14, 20);
+    let currentY = 20;
+
+    // 1. Draw custom logo & letterhead if configured
+    if (logoBase64) {
+      try {
+        const cleanBase64 = logoBase64.includes(",") ? logoBase64.split(",")[1] : logoBase64;
+        doc.addImage(cleanBase64, "PNG", 14, 10, 15, 15);
+        currentY = 32;
+      } catch (err) {
+        console.error("Failed to render firm logo in PDF", err);
+      }
+    }
+
+    if (firmName) {
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(24, 24, 27); // Dark gray
+      doc.text(firmName.toUpperCase(), logoBase64 ? 32 : 14, logoBase64 ? 17 : 14);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(113, 113, 122); // Light gray
+      doc.text("AEGIS LEGAL SUITE — SECURE OFFLINE SYSTEM", logoBase64 ? 32 : 14, logoBase64 ? 22 : 19);
+      
+      // Draw horizontal divider line
+      doc.setDrawColor(228, 228, 231);
+      doc.line(14, logoBase64 ? 28 : 22, 196, logoBase64 ? 28 : 22);
+      currentY = logoBase64 ? 36 : 28;
+    }
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(9, 9, 11);
+    doc.text(title, 14, currentY);
+    
     doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(63, 63, 70);
     const lines = doc.splitTextToSize(content, 180);
-    doc.text(lines, 14, 35);
+    doc.text(lines, 14, currentY + 10);
     doc.save(`${title.replace(/\s+/g, "_")}.pdf`);
   } catch (e) {
     alert("PDF export failed. Ensure jsPDF is installed.");
@@ -83,7 +117,7 @@ export default function Home() {
   
   // Forms
   const [newClient, setNewClient] = useState({ name: "", email: "", phone: "", notes: "" });
-  const [newMatter, setNewMatter] = useState({ title: "", case_number: "", court: "", judge: "", opponent_name: "", opposing_advocate: "", facts: "" });
+  const [newMatter, setNewMatter] = useState({ title: "", case_number: "", court: "", judge: "", opponent_name: "", opposing_advocate: "", facts: "", cnr_number: "" });
   const [newSchedule, setNewSchedule] = useState({ title: "", schedule_type: "hearing", target_date: "", notes: "" });
 
   // Conflict Checker States
@@ -134,6 +168,8 @@ export default function Home() {
   const [lineSpacing, setLineSpacing] = useState("1.5");
   const [marginSpaces, setMarginSpaces] = useState("4");
   const [isFormattingDraft, setIsFormattingDraft] = useState(false);
+  const [firmName, setFirmName] = useState("");
+  const [firmLogo, setFirmLogo] = useState("");
 
   // Backups State
   const [backupHistory, setBackupHistory] = useState<any[]>([]);
@@ -417,6 +453,8 @@ export default function Home() {
       if (response.ok) {
         const data = await response.json();
         setCurrentUser(data);
+        setFirmName(data.firm_name || "");
+        setFirmLogo(data.firm_logo || "");
       }
     } catch (err) {
       console.error(err);
@@ -549,7 +587,7 @@ export default function Home() {
       });
       if (response.ok) {
         showNotification("Matter created successfully", "success");
-        setNewMatter({ title: "", case_number: "", court: "", judge: "", opponent_name: "", opposing_advocate: "", facts: "" });
+        setNewMatter({ title: "", case_number: "", court: "", judge: "", opponent_name: "", opposing_advocate: "", facts: "", cnr_number: "" });
         fetchMatters(selectedClient.id);
       }
     } catch (err) {
@@ -879,7 +917,9 @@ export default function Home() {
         // Auto PDF export
         exportToPDF(
           inv.invoice_number,
-          `INVOICE\n${inv.invoice_number}\nClient: ${selectedClient?.name}\nTotal: ₹${inv.total_amount}\nGST (18%): ₹${inv.gst_amount}\nGrand Total: ₹${inv.grand_total}\nStatus: ${inv.status}\nDate: ${new Date().toLocaleDateString("en-IN")}`
+          `INVOICE\n${inv.invoice_number}\nClient: ${selectedClient?.name}\nTotal: ₹${inv.total_amount}\nGST (18%): ₹${inv.gst_amount}\nGrand Total: ₹${inv.grand_total}\nStatus: ${inv.status}\nDate: ${new Date().toLocaleDateString("en-IN")}`,
+          currentUser?.firm_name,
+          currentUser?.firm_logo
         );
       }
     } catch (e: any) { showNotification(e.message, "error"); }
@@ -1643,6 +1683,54 @@ export default function Home() {
                       <div><strong className="text-zinc-500">Court:</strong> {selectedMatter.court || "Not specified"}</div>
                       <div><strong className="text-zinc-500">Judge:</strong> {selectedMatter.judge || "Not specified"}</div>
                       <div><strong className="text-zinc-500">Status:</strong> <span className="px-1.5 py-0.5 bg-zinc-800 rounded uppercase text-[10px] font-mono text-zinc-400">{selectedMatter.status}</span></div>
+                      
+                      {selectedMatter.cnr_number && (
+                        <div className="pt-1.5 flex items-center justify-between border-t border-zinc-850/60">
+                          <div>
+                            <strong className="text-zinc-500">CNR Number:</strong>
+                            <p className="font-mono text-zinc-300 text-[10px] mt-0.5">{selectedMatter.cnr_number}</p>
+                          </div>
+                          
+                          <div className="flex items-center gap-1.5">
+                            {selectedMatter.is_locked ? (
+                              <span className="text-[9px] px-2 py-0.5 rounded-md border border-emerald-800/60 bg-emerald-950/20 text-emerald-400 font-bold tracking-wider font-mono">
+                                LOCKED SECURE
+                              </span>
+                            ) : (
+                              <button 
+                                onClick={async () => {
+                                  try {
+                                    showNotification("Connecting safely to eCourts platform...", "success");
+                                    const res = await fetchWithAuth(`${API_BASE}/api/matters/${selectedMatter.id}/sync-ecourts`, {
+                                      method: "POST"
+                                    });
+                                    const data = await res.json();
+                                    if (res.ok && data.status === "success") {
+                                      showNotification(data.message, "success");
+                                      fetchMatters(selectedClient.id);
+                                      setSelectedMatter((prev: any) => ({ 
+                                        ...prev, 
+                                        court: data.court, 
+                                        judge: data.judge, 
+                                        is_locked: true 
+                                      }));
+                                      fetchSchedules(selectedMatter.id);
+                                    } else {
+                                      showNotification(data.message || "Failed to sync eCourts date", "error");
+                                    }
+                                  } catch (e: any) {
+                                    showNotification(e.message, "error");
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-violet-900/60 border border-violet-850 text-white font-semibold text-[9px] rounded-lg hover:bg-violet-800 transition cursor-pointer"
+                              >
+                                Sync eCourts
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      
                       <div className="pt-2 border-t border-zinc-800">
                         <strong className="text-zinc-500">Case Facts Summary:</strong>
                         <p className="text-[11px] text-zinc-400 mt-1 line-clamp-4">{selectedMatter.facts || "No encrypted facts summary saved."}</p>
@@ -1920,6 +2008,16 @@ export default function Home() {
                         value={newMatter.opposing_advocate || ""}
                         onChange={(e) => setNewMatter({ ...newMatter, opposing_advocate: e.target.value })}
                         placeholder="Jane Smith, Adv."
+                        className="w-full p-2.5 text-xs rounded-lg glass-input text-zinc-200"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase">eCourts CNR Number</label>
+                      <input 
+                        type="text" 
+                        value={newMatter.cnr_number || ""}
+                        onChange={(e) => setNewMatter({ ...newMatter, cnr_number: e.target.value })}
+                        placeholder="e.g. DLHC010001232026"
                         className="w-full p-2.5 text-xs rounded-lg glass-input text-zinc-200"
                       />
                     </div>
@@ -2529,7 +2627,7 @@ export default function Home() {
                         <button 
                           onClick={() => {
                             const content = `FIR & CRIMINAL CONTRADICTION REPORT\n\nOVERVIEW:\n${firResult.case_overview}\n\nCONTRADICTIONS:\n${firResult.contradictions?.map((c: any) => `- [${c.severity}] ${c.document_a} vs ${c.document_b}: ${c.contradiction_detail}`).join("\n")}\n\nDEFENSE POINTS:\n${firResult.defense_points?.map((d: any) => `- [Strength: ${d.strength}] ${d.point} (${d.legal_basis})`).join("\n")}\n\nGAPS IN EVIDENCE:\n${firResult.missing_evidence?.map((g: string) => `- ${g}`).join("\n")}\n\nAPPLICABLE BNS SECTIONS:\n${firResult.applicable_sections_bns?.join(", ")}`;
-                            exportToPDF("FIR_Contradiction_Report", content);
+                            exportToPDF("FIR_Contradiction_Report", content, currentUser?.firm_name, currentUser?.firm_logo);
                           }}
                           className="px-3 py-1.5 bg-rose-900/50 hover:bg-rose-800 border border-rose-800 text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer"
                         >
@@ -2626,7 +2724,7 @@ export default function Home() {
                         <button 
                           onClick={() => {
                             const content = `CASE OUTCOME PREDICTION REPORT\n\nPREDICTED OUTCOME: ${predictResult.predicted_outcome} (${predictResult.confidence_percentage}% Confidence)\n\nREASONING:\n${predictResult.reasoning?.map((r: string) => `- ${r}`).join("\n")}\n\nRISK FACTORS:\n${predictResult.risk_factors?.map((rf: string) => `- ${rf}`).join("\n")}\n\nSUGGESTIONS:\n${predictResult.strengthening_suggestions?.map((s: string) => `- ${s}`).join("\n")}\n\nPRECEDENTS:\n${predictResult.similar_precedents?.map((p: any) => `- ${p.case_name} (${p.citation}): ${p.relevance}`).join("\n")}\n\nESTIMATED TIMELINE: ${predictResult.estimated_timeline_months} months`;
-                            exportToPDF("Case_Prediction_Report", content);
+                            exportToPDF("Case_Prediction_Report", content, currentUser?.firm_name, currentUser?.firm_logo);
                           }}
                           className="px-3 py-1.5 bg-blue-900/50 hover:bg-blue-800 border border-blue-800 text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer"
                         >
@@ -2791,7 +2889,7 @@ export default function Home() {
                       <button
                         onClick={() => {
                           const content = `CONTRACT RISK SCAN REPORT\n\n${auditRisks.map(r => `CLAUSE: ${r.clause_title} [Risk: ${r.risk_rating}]\nSummary: ${r.summary}\nRemediation: ${r.remediation_advice}`).join("\n\n")}`;
-                          exportToPDF("Contract_Risk_Scan_Report", content);
+                          exportToPDF("Contract_Risk_Scan_Report", content, currentUser?.firm_name, currentUser?.firm_logo);
                         }}
                         className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer"
                       >
@@ -3104,7 +3202,7 @@ export default function Home() {
                           </button>
                           <button 
                             onClick={() => {
-                              exportToPDF(selectedTemplate?.name || "Legal_Draft", generatedDraft);
+                              exportToPDF(selectedTemplate?.name || "Legal_Draft", generatedDraft, currentUser?.firm_name, currentUser?.firm_logo);
                             }}
                             className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-zinc-200 transition cursor-pointer border-l border-zinc-800 pl-2"
                           >
@@ -3521,7 +3619,9 @@ export default function Home() {
                             onClick={() => {
                               exportToPDF(
                                 inv.invoice_number,
-                                `INVOICE\n${inv.invoice_number}\nTotal: ₹${inv.total_amount}\nGST (18%): ₹${inv.gst_amount}\nGrand Total: ₹${inv.grand_total}\nStatus: ${inv.status}\nDate: ${new Date(inv.created_at).toLocaleDateString("en-IN")}`
+                                `INVOICE\n${inv.invoice_number}\nTotal: ₹${inv.total_amount}\nGST (18%): ₹${inv.gst_amount}\nGrand Total: ₹${inv.grand_total}\nStatus: ${inv.status}\nDate: ${new Date(inv.created_at).toLocaleDateString("en-IN")}`,
+                                currentUser?.firm_name,
+                                currentUser?.firm_logo
                               );
                             }}
                             title="Download Invoice PDF"
@@ -3680,6 +3780,77 @@ export default function Home() {
                     <div className="flex justify-between p-2 bg-zinc-950/60 rounded-lg"><span className="text-zinc-500">Email</span><span className="text-zinc-200">{currentUser?.email}</span></div>
                     <div className="flex justify-between p-2 bg-zinc-950/60 rounded-lg"><span className="text-zinc-500">Role</span><span className="text-zinc-200 capitalize">{currentUser?.role}</span></div>
                     <div className="flex justify-between p-2 bg-zinc-950/60 rounded-lg"><span className="text-zinc-500">2FA</span><span className={twoFaEnabled ? "text-emerald-400" : "text-zinc-400"}>{twoFaEnabled ? "Enabled" : "Disabled"}</span></div>
+                  </div>
+                </div>
+                
+                <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
+                  <h3 className="text-sm font-bold text-zinc-200">Custom Firm Letterhead</h3>
+                  <p className="text-xs text-zinc-400">Configure logo and title displayed on all generated PDFs &amp; Invoices.</p>
+                  
+                  <div className="space-y-3 text-xs">
+                    <div>
+                      <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">Firm / Advocate Name</label>
+                      <input 
+                        type="text" 
+                        value={firmName} 
+                        onChange={(e) => setFirmName(e.target.value)} 
+                        placeholder="e.g. Chambers of Aryan Yadav"
+                        className="w-full p-2.5 rounded-lg glass-input text-zinc-200"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">Firm Logo (PNG / JPG)</label>
+                      <input 
+                        type="file" 
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              if (event.target?.result) {
+                                setFirmLogo(event.target.result as string);
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="w-full text-xs text-zinc-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-zinc-800 file:text-zinc-200 hover:file:bg-zinc-700 cursor-pointer"
+                      />
+                    </div>
+                    
+                    {firmLogo && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-zinc-500 font-bold block uppercase font-mono">Logo Preview</span>
+                        <div className="p-2 bg-zinc-950/60 rounded-lg inline-block">
+                          <img src={firmLogo} alt="Logo preview" className="h-12 w-auto object-contain rounded" />
+                        </div>
+                      </div>
+                    )}
+                    
+                    <button 
+                      onClick={async () => {
+                        try {
+                          const res = await fetchWithAuth(`${API_BASE}/api/user/firm-settings`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ firm_name: firmName, firm_logo: firmLogo })
+                          });
+                          if (res.ok) {
+                            showNotification("Firm configuration saved successfully!", "success");
+                            setCurrentUser((prev: any) => ({ ...prev, firm_name: firmName, firm_logo: firmLogo }));
+                          } else {
+                            showNotification("Failed to save firm configuration", "error");
+                          }
+                        } catch (e: any) {
+                          showNotification(e.message, "error");
+                        }
+                      }}
+                      className="w-full py-2 bg-violet-800 hover:bg-violet-750 text-white font-bold rounded-lg transition text-xs cursor-pointer"
+                    >
+                      Save Configuration
+                    </button>
                   </div>
                 </div>
               </div>
