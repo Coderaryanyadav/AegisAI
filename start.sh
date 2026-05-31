@@ -23,10 +23,10 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 8501))" 2>/dev/null
+python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 3000))" 2>/dev/null
 if [ $? -ne 0 ]; then
-    echo "[!] Error: Port 8501 (Streamlit Frontend) is already in use."
-    echo "    Please stop any process running on port 8501."
+    echo "[!] Error: Port 3000 (Next.js React Frontend) is already in use."
+    echo "    Please stop any process running on port 3000."
     exit 1
 fi
 
@@ -52,6 +52,18 @@ else
     pip install -r requirements.txt
 fi
 
+# Check for Node.js (required for Next.js frontend dev server)
+if ! command -v npm &>/dev/null; then
+    echo "[!] Error: Node.js/NPM is not installed. Please install Node.js to run the Next.js frontend."
+    exit 1
+fi
+
+# Verify frontend node_modules
+if [ ! -d "aegis_frontend/node_modules" ]; then
+    echo "[*] Installing frontend dependencies in aegis_frontend..."
+    cd aegis_frontend && npm install && cd ..
+fi
+
 # Check for Ollama Setup
 if command -v ollama &>/dev/null; then
     echo "[*] Ollama CLI detected."
@@ -59,16 +71,6 @@ if command -v ollama &>/dev/null; then
     python3 -c "import socket; s = socket.socket(); s.connect(('127.0.0.1', 11434))" 2>/dev/null
     if [ $? -eq 0 ]; then
         echo "[*] Ollama service is active."
-        # Check if model is pulled
-        if ollama list | grep -q "qwen3:8b"; then
-            echo "[*] Found qwen3:8b local model."
-        else
-            echo "----------------------------------------------------------"
-            echo "[⚠️ WARNING] Local model 'qwen3:8b' not found in Ollama."
-            echo "We recommend running this command in another terminal:"
-            echo "    ollama pull qwen3:8b"
-            echo "----------------------------------------------------------"
-        fi
     else
         echo "----------------------------------------------------------"
         echo "[⚠️ WARNING] Ollama service is not running on port 11434."
@@ -80,17 +82,22 @@ else
     echo "[⚠️ WARNING] Ollama CLI was not found in your PATH."
     echo "Aegis AI runs 100% locally and requires Ollama."
     echo "Please download and install it from: https://ollama.com/"
-    echo "Once installed, pull the model by running:"
-    echo "    ollama pull qwen3:8b"
     echo "----------------------------------------------------------"
 fi
 
 # Ensure data directories exist
-mkdir -p data/encrypted_files data/chromadb
+mkdir -p data
 
-# Launch Standalone Desktop Application
-echo "[*] Launching Aegis Legal AI Standalone Desktop Application..."
-echo "----------------------------------------------------------"
-python3 desktop_app.py
+echo "=========================================================="
+echo "[*] Starting AegisAI FastAPI Backend & Next.js Frontend..."
+echo "=========================================================="
 
-# The cleanup trap will run when Streamlit exits
+# Trap to kill background tasks on exit
+trap 'kill $(jobs -p)' EXIT
+
+# Launch backend in background
+PYTHONPATH=. python3 aegis_backend/main.py &
+
+# Launch Next.js frontend
+cd aegis_frontend && npm run dev
+

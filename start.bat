@@ -14,7 +14,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: Check for Port Collisions (Port 8000 for FastAPI, Port 8501 for Streamlit)
+:: Check for Port Collisions (Port 8000 for FastAPI, Port 3000 for Next.js)
 python -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 8000))" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [!] Error: Port 8000 (FastAPI Backend) is already in use.
@@ -23,10 +23,10 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-python -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 8501))" >nul 2>&1
+python -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 3000))" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [!] Error: Port 8501 (Streamlit Frontend) is already in use.
-    echo     Please stop any process running on port 8501.
+    echo [!] Error: Port 3000 (Next.js React Frontend) is already in use.
+    echo     Please stop any process running on port 3000.
     pause
     exit /b 1
 )
@@ -55,9 +55,24 @@ if not exist "venv" (
     pip install -r requirements.txt
 )
 
+:: Check for Node.js (required for Next.js frontend dev server)
+where npm >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [!] Error: Node.js/NPM is not installed. Please install Node.js to run the Next.js frontend.
+    pause
+    exit /b 1
+)
+
+:: Verify frontend node_modules
+if not exist "aegis_frontend\node_modules" (
+    echo [*] Installing frontend dependencies in aegis_frontend...
+    cd aegis_frontend
+    call npm install
+    cd ..
+)
+
 :: Ensure data directories exist
-if not exist "data\encrypted_files" mkdir "data\encrypted_files"
-if not exist "data\chromadb" mkdir "data\chromadb"
+if not exist "data" mkdir "data"
 
 :: Check for Ollama Setup
 where ollama >nul 2>&1
@@ -67,17 +82,6 @@ if %errorlevel% eq 0 (
     powershell -Command "try { $r = Invoke-WebRequest -Uri http://127.0.0.1:11434/api/tags -UseBasicParsing -TimeoutSec 2; exit 0 } catch { exit 1 }" >nul 2>&1
     if %errorlevel% eq 0 (
         echo [*] Ollama service is active and running.
-        :: Check if qwen3:8b is pulled
-        ollama list | findstr "qwen3:8b" >nul 2>&1
-        if %errorlevel% eq 0 (
-            echo [*] Found qwen3:8b local model.
-        ) else (
-            echo ----------------------------------------------------------
-            echo [WARNING] Local model 'qwen3:8b' not found in Ollama.
-            echo We recommend running this command in another terminal:
-            echo     ollama pull qwen3:8b
-            echo ----------------------------------------------------------
-        )
     ) else (
         echo ----------------------------------------------------------
         echo [WARNING] Ollama service is not running on port 11434.
@@ -89,12 +93,17 @@ if %errorlevel% eq 0 (
     echo [WARNING] Ollama CLI was not found in your PATH.
     echo Aegis AI runs 100% locally and requires Ollama.
     echo Please download and install it from: https://ollama.com/
-    echo Once installed, pull the model by running:
-    echo     ollama pull qwen3:8b
     echo ----------------------------------------------------------
 )
 
-:: Launch Standalone Desktop Application
-echo [*] Launching Aegis Legal AI Standalone Desktop Application...
-echo ----------------------------------------------------------
-python desktop_app.py
+echo ==========================================================
+echo [*] Starting AegisAI FastAPI Backend & Next.js Frontend...
+echo ==========================================================
+
+:: Launch backend in background
+start /b cmd /c "set PYTHONPATH=.&& python aegis_backend\main.py"
+
+:: Launch Next.js frontend in the foreground
+cd aegis_frontend
+call npm run dev
+

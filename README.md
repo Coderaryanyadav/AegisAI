@@ -1,20 +1,19 @@
-# ⚖️ Aegis Legal AI
+# ⚖️ AegisAI: Enterprise Offline Legal Assistant
 
-Aegis Legal AI is a **production-quality, self-hosted, and fully offline RAG assistant** designed for law firms. Built with absolute privacy and confidentiality in mind, Aegis ensures that sensitive client files, evidence, court orders, and contracts never leave the local hardware.
-
-The application runs entirely within an air-gapped environment, utilizing a local **Ollama** inference engine and local embeddings to power contract audits, document searches, and draft generation.
+AegisAI is a **production-quality, self-hosted, and 100% offline RAG (Retrieval-Augmented Generation) assistant** designed specifically for law firms and corporate legal departments. AegisAI ensures absolute confidentiality: all client case files, documents, evidence, schedules, and credentials remain entirely on local hardware, protected by state-of-the-art offline security layers.
 
 ---
 
-## ⚡ Key Features
+## ⚡ Core Features
 
-* **🔒 Zero-Cloud Confidentiality**: Run entirely on local hardware with zero external API calls. 
-* **📁 AES-256 Storage at Rest**: Case files (PDF/TXT) are dynamically encrypted using AES-256 (Fernet cipher) on the filesystem immediately upon upload.
-* **💬 Citation-Aware RAG Chat**: Retrieve semantic answers scoped to specific case files. Every response includes precise document page citations (e.g., `[Contract.pdf, Page 12]`).
-* **🔍 Contract Risk Auditor**: Automated clause extraction (Termination, Governing Law, Indemnity), critical liability detection (High/Medium/Low), and compliance gap identification.
-* **✍️ Context-Grounded Legal Draftsman**: Generate drafts of notices, filings, or contracts using your local files as references.
-* **📋 Security Compliance Log**: A tamper-resistant, relational audit trail logging every user login, file upload, search query, and deletion with timestamp, IP, and details.
-* **👑 Dynamic Role-Based Access Control**: Simple multi-user permission layers (`Admin`, `Lawyer`, `Auditor`).
+*   **🔒 Zero-Internet Confidentiality**: Works 100% offline. Bypasses external API and download dependencies via a built-in pre-bundled model and a custom offline embedding function.
+*   **📡 eCourts API Sync & Local Data Locking**: Automatically syncs hearings, benches, and details from the official eCourts platform via Case Registration Number (CNR). Once synced, the matter data is locked locally to prevent remote tampering or hijacking.
+*   **🛡️ Multi-User RBAC & pyotp 2FA/MFA**: Dynamic role-based access control (`Admin`, `Lawyer`, `Auditor`) with integrated two-factor authentication (2FA) via Authenticator apps (Google Authenticator, Microsoft Authenticator, etc.).
+*   **🏢 Custom Firm Branding & Letterheads**: Configure firm name, address, contact, and base64-encoded logo to generate branded professional client communications dynamically.
+*   **🚨 Panic Button (Secure Workspace Wipe)**: In case of physical or system compromise, trigger a panic wipe. Instantly scrubs active database records, deletes the local vector store and files, and generates a sealed AES-256 recovery archive in a user-configured location.
+*   **💬 Citation-Aware Legal RAG Chat**: Local AI model answers queries grounded directly on uploaded case files (PDF/TXT), providing page-by-page references.
+*   **🔍 Contract Risk Auditor & Timeline Generator**: Analyzes uploaded contracts for high/medium/low risks, and constructs an interactive facts timeline.
+*   **📊 Dynamic Billing & GST Invoices**: Track hours logged per matter, define billable rates, and generate formal GST-compliant PDF/HTML invoices.
 
 ---
 
@@ -22,19 +21,22 @@ The application runs entirely within an air-gapped environment, utilizing a loca
 
 ```mermaid
 graph TD
-    UI[Streamlit Desktop client] -->|HTTP / JSON / JWT| API[FastAPI Backend Server]
-    API -->|Auth / Metadata / Log Actions| DB[(SQLite Database)]
-    API -->|AES-256 Cipher| EncryptedFS[Encrypted Local Storage]
+    User([User]) -->|Interact| Electron[Electron Desktop Window]
+    Electron -->|Render Static| React[Next.js React Frontend: Port 3000]
+    React -->|HTTP / JSON / JWT| FastAPI[FastAPI Backend Server: Port 8000]
     
-    subgraph Local Ingestion & Pipeline
-        API -->|Page-by-page Extract| Ingestor[PDF/TXT Ingestor]
-        Ingestor -->|Sentence delimiters| Chunker[Recursive Chunker]
-        Chunker -->|Local Embeddings| VDB[(Chroma Vector DB)]
+    FastAPI -->|Auth / Logs / Metadata| SQLite[(Local SQLite Database)]
+    FastAPI -->|Dynamic AES-256 Encryption| EncryptedFS[Encrypted Local Storage]
+    
+    subgraph Offline Ingestion & Embedding Pipeline
+        FastAPI -->|Text Extraction| Extractor[PDF/TXT Processor]
+        Extractor -->|Local Deterministic Split| Chunker[Recursive Chunker]
+        Chunker -->|Offline Hashing Embedder| Chroma[(Local Chroma Vector DB)]
     end
     
-    subgraph Local Inference Engine
-        API -->|Semantic Retrieval Context| RAG[RAG Orchestrator]
-        RAG -->|Prompt Pipeline| LLM[Ollama Local LLM]
+    subgraph Local Inference Orchestration
+        FastAPI -->|Semantic Context| RAG[RAG Orchestrator]
+        RAG -->|Local Model Query| Ollama[Ollama Service: Port 11434]
     end
 ```
 
@@ -42,112 +44,86 @@ graph TD
 
 ## 🛠️ Technology Stack
 
-* **Frontend**: Streamlit (Premium customized Dark/Glassmorphic SaaS theme)
-* **Backend**: FastAPI (Python)
-* **Database**: SQLite (ORM via SQLAlchemy)
-* **Vector DB**: ChromaDB (Running locally in persistent client mode)
-* **Embeddings**: Local HuggingFace sentence-transformers (`all-MiniLM-L6-v2`)
-* **Local Inference**: Ollama (`qwen3:8b` or `llama3:latest`)
-* **Security & Auth**: PyJWT (token access) + Bcrypt (native password hashing) + Cryptography (AES-256 Fernet)
+*   **UI Client**: Next.js (React 19) + Vanilla CSS premium glassmorphic UI + Electron wrapper
+*   **Backend**: FastAPI (Python 3.11+)
+*   **Database**: SQLite (SQLAlchemy ORM)
+*   **Vector Database**: ChromaDB (configured for persistent local filesystem mode)
+*   **Offline Embedding Function**: Programmatic hashing vector generator (no ONNX/internet pre-fetch required)
+*   **Local Inference**: Ollama (`deepseek-r1:8b`, `llama3.2:3b`, `qwen2.5-coder:3b`, etc.)
+*   **Security & Encryption**: PyJWT (session authentication) + pyotp (MFA) + bcrypt (password hashing) + cryptography (AES-256 Fernet ciphers for file vault storage)
 
 ---
 
-## 🚀 Running the Standalone Desktop Application
+## 🚀 One-Click Local Development Setup
 
-Aegis Legal AI is equipped with **self-bootstrapping startup scripts** for both Windows and macOS/Linux. These scripts automatically verify your Python installation, setup a virtual environment (`venv`), install dependencies, and run the native desktop launcher `desktop_app.py` in one-click.
+AegisAI includes fully automated, self-bootstrapping startup scripts for both Windows and macOS.
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/Coderaryanyadav/AegisAI.git
-   cd AegisAI
-   ```
+### 1. Clone the Repository
+```bash
+git clone https://github.com/Coderaryanyadav/AegisAI.git
+cd AegisAI
+```
 
-2. **Launch the Desktop Software**:
-   * **macOS / Linux**:
-     ```bash
-     chmod +x start.sh
-     ./start.sh
-     ```
-   * **Windows**:
-     Double-click `start.bat` or run it in Command Prompt:
-     ```cmd
-     start.bat
-     ```
+### 2. Launch the Application Suite
+*   **macOS / Linux**:
+    ```bash
+    chmod +x start.sh
+    ./start.sh
+    ```
+*   **Windows**:
+    Double-click `start.bat` or run in Command Prompt:
+    ```cmd
+    start.bat
+    ```
 
-This will automatically launch the **Aegis Legal AI Suite** in its own standalone desktop window. **No web browser tabs or command prompt windows will pop open.**
+The scripts will automatically verify Python 3, create a virtual environment (`venv`), install backend requirements, check for Node.js/NPM, compile `aegis_frontend/node_modules`, check Ollama status, spin up the FastAPI server, and launch the Next.js frontend on `http://localhost:3000`.
 
 ---
 
 ## 📦 Building Standalone Installers for Clients
 
-If you want to package the app into a standalone installer (`.dmg` or `.exe`) that you can directly install on your client's computer (with no Python dependencies required on their end):
+To build a standalone installable bundle (`.dmg` or `.exe`) packaging the backend executable, model bundles, Next.js static pages, and the Electron wrapper:
 
-### 1. Compile the App Bundle
-Run the compiler script to package python and all dependencies:
+### 1. Compile Backend & Frontend Assets
+Run the bundler script:
 ```bash
 python build_desktop.py
 ```
-This produces the compiled app under `dist/AegisLegalAI.app` (macOS) or `dist/AegisLegalAI/AegisLegalAI.exe` (Windows).
+This runs PyInstaller to package the FastAPI backend with its local database engines and dependencies under `dist/aegis_backend/`, compiles Next.js pages, and copies them to the Electron wrapper.
 
-### 2. Package the Installer
-* **macOS**: Package the app into a double-clickable drag-and-drop disk image installer:
-  ```bash
-  ./package_dmg.sh
-  ```
-  This creates `dist/AegisLegalAI.dmg`.
-* **Windows**: Use **Inno Setup** with the provided `installer.iss` file to compile a standard setup wizard `dist/AegisLegalAI_Setup.exe`.
-
-### Default Sign-In Credentials (Demo)
-* **Email**: `admin@legalai.local`
-* **Password**: `adminpassword123`
-* *(You can also click the "Autofill Demo" button on the secure sign-in page to fill this in one click)*
+### 2. Build Platform Installers
+*   **macOS DMG**:
+    ```bash
+    ./package_dmg.sh
+    ```
+    This outputs the Drag-and-Drop installer at `dist_desktop/AegisAI-1.0.0-arm64.dmg`.
+*   **Windows Installer**:
+    Use **Inno Setup** with the provided `installer.iss` file to compile a setup wizard executable under `dist_desktop/`.
 
 ---
 
-## 🧪 Running Unit Tests
+## 🧪 Integration & Validation Testing
 
-We maintain strict verification logic for database operations, hashing, encryption, and semantic indexing. Run them using pytest:
+AegisAI includes an ultra-thorough, 36-step end-to-end API integration validation suite covering user signup, 2FA generation/verification, eCourts CNR parsing, data locking, encrypted file vault operations, local RAG question-answering, custom invoice drafting, backup snapshotting, and panic wipes.
 
+To run the integration verification test suite:
+1. Ensure the FastAPI backend is running (`python aegis_backend/main.py` on port 8000).
+2. Execute the test runner:
 ```bash
-python3 -m pytest
+PYTHONPATH=. ./venv/bin/python tests/ultra_hardcore_test.py
 ```
 
+All 36 checks must pass green for a build to be certified for production deployment.
+
 ---
 
-## 🔍 Troubleshooting & FAQ
+## 🔍 Troubleshooting & Resetting
 
-### 1. `Ollama service is not running` or `Model qwen3:8b not found`
-- **Solution**: Make sure you have downloaded the Ollama app from [ollama.com](https://ollama.com) and that the application is running (you should see the Ollama icon in your taskbar/menubar).
-- To pull the recommended model, open a terminal window and run:
-  ```bash
-  ollama pull qwen3:8b
-  ```
-- If you run a different model (e.g. `llama3`), Aegis will dynamically fall back to it, but `qwen3:8b` is highly recommended for structured legal drafting.
+### Database Reset
+To wipe the developer database and restore the default state, delete `data/legal_assistant.db` (or delete `~/.aegis_ai/` on client environments). AegisAI will automatically reinitialize a fresh database schema on its next startup.
 
-### 2. `Port 8000` or `Port 8501` already in use
-- **Solution**: This happens if another service (or a previous session of Aegis) is already running on those ports.
-- On **macOS/Linux**, find and terminate the process:
-  ```bash
-  lsof -i :8000
-  kill -9 <PID>
-  ```
-- On **Windows**, terminate any uvicorn or python server tasks:
-  ```cmd
-  taskkill /F /IM python.exe
-  ```
-
-### 3. Database is locked / Resetting database
-- In developer mode, Aegis stores document metadata, users, and audit trails in a local SQLite file: `data/legal_assistant.db`.
-- In compiled standalone mode, client databases are located in their home directory: `~/.aegis_legal_ai/data/legal_assistant.db`.
-- If you ever need to reset the system database or start fresh, simply delete the corresponding `legal_assistant.db` file. Aegis will automatically recreate a fresh database and seed the default administrator account on the next startup.
-
-### 4. Binary package errors during `pip install` (e.g. greenlet, bcrypt)
-- **Solution**: Ensure your Python installation is up to date, and you have development build tools installed.
-- On **macOS**, ensure Xcode Command Line Tools are installed:
-  ```bash
-  xcode-select --install
-  ```
-- On **Linux (Ubuntu/Debian)**:
-  ```bash
-  sudo apt-get install python3-dev build-essential
-  ```
+### Port Collisions
+*   FastAPI backend runs on port **8000**.
+*   Next.js frontend runs on port **3000**.
+*   Ollama service runs on port **11434**.
+Please ensure no other services are using these ports before launching the app.
