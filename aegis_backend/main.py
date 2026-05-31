@@ -27,7 +27,7 @@ import jwt
 from pydantic import BaseModel, EmailStr
 
 from aegis_backend.database import (
-    init_db, get_db, User, Client, Matter, Schedule, Document, AuditLog, BackupHistory,
+    init_db, get_db, SessionLocal, User, Client, Matter, Schedule, Document, AuditLog, BackupHistory,
     BareActSection, TimeEntry, Invoice, Annotation, TwoFactorSecret, AEGIS_DIR, DB_PATH
 )
 from aegis_backend.vector_store import LocalVectorStore
@@ -71,21 +71,26 @@ async def ensure_ollama_runtime():
     if not is_running:
         logger.info("Ollama is not running. Attempting to start local Ollama service...")
         try:
-            if sys.platform == "darwin":
-                # Launch macOS desktop app quietly
-                subprocess.Popen(["open", "-g", "-a", "Ollama"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                logger.info("Executed background command: open -g -a Ollama")
-            elif sys.platform == "win32":
-                local_app_data = os.environ.get("LOCALAPPDATA", "")
-                ollama_exe = os.path.join(local_app_data, "Programs", "Ollama", "ollama app.exe")
-                if os.path.exists(ollama_exe):
-                    subprocess.Popen([ollama_exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                else:
-                    subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                logger.info("Executed background command to launch Ollama Windows service.")
+            import shutil
+            ollama_path = shutil.which("ollama")
+            if not ollama_path:
+                if sys.platform == "darwin":
+                    for path in ["/Applications/Ollama.app/Contents/Resources/ollama", "/usr/local/bin/ollama"]:
+                        if os.path.exists(path):
+                            ollama_path = path
+                            break
+                elif sys.platform == "win32":
+                    local_app_data = os.environ.get("LOCALAPPDATA", "")
+                    win_path = os.path.join(local_app_data, "Programs", "Ollama", "ollama.exe")
+                    if os.path.exists(win_path):
+                        ollama_path = win_path
+
+            if ollama_path:
+                logger.info(f"Spawning background Ollama daemon programmatically: {ollama_path} serve")
+                subprocess.Popen([ollama_path, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
+                logger.info("Ollama binary not found in common locations. Attempting standard command execute...")
                 subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                logger.info("Executed background command: ollama serve")
         except Exception as e:
             logger.error(f"Failed to start Ollama daemon automatically: {e}")
 
@@ -217,6 +222,17 @@ class ClientCreate(BaseModel):
     phone: Optional[str] = None
     notes: Optional[str] = None
 
+class ClientResponse(BaseModel):
+    id: int
+    name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class MatterCreate(BaseModel):
     client_id: int
     case_number: Optional[str] = None
@@ -229,12 +245,55 @@ class MatterCreate(BaseModel):
     facts: Optional[str] = None
     cnr_number: Optional[str] = None
 
+class MatterResponse(BaseModel):
+    id: int
+    client_id: int
+    case_number: Optional[str] = None
+    title: str
+    court: Optional[str] = None
+    judge: Optional[str] = None
+    opponent_name: Optional[str] = None
+    opposing_advocate: Optional[str] = None
+    status: str
+    facts: Optional[str] = None
+    cnr_number: Optional[str] = None
+    is_locked: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class ScheduleCreate(BaseModel):
     matter_id: int
     title: str
     schedule_type: str  # hearing, deadline, meeting
     target_date: str
     notes: Optional[str] = None
+
+class ScheduleResponse(BaseModel):
+    id: int
+    matter_id: int
+    title: str
+    schedule_type: str
+    target_date: str
+    notes: Optional[str] = None
+    is_completed: bool
+
+    class Config:
+        from_attributes = True
+
+class DocumentResponse(BaseModel):
+    id: int
+    matter_id: Optional[int] = None
+    original_name: str
+    stored_uuid: str
+    file_path: str
+    file_hash: str
+    status: str
+    uploaded_at: datetime
+
+    class Config:
+        from_attributes = True
 
 class ResearchQuery(BaseModel):
     query: str
@@ -342,13 +401,13 @@ def update_firm_settings(req: FirmSettingsUpdate, db: Session = Depends(get_db),
 
 
 # 2. CLIENT RECORDS
-@app.get("/api/clients")
+@app.get("/api/clients", response_model=List[ClientResponse])
 def list_clients(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.role == "client":
         return db.query(Client).filter(Client.email == current_user.email).all()
     return db.query(Client).all()
 
-@app.post("/api/clients")
+@app.post("/api/clients", response_model=ClientResponse)
 def create_client(client_in: ClientCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     client = Client(**client_in.dict())
     db.add(client)
@@ -369,7 +428,7 @@ def delete_client(id: int, db: Session = Depends(get_db), current_user: User = D
 
 
 # 3. MATTERS (Indian Case Files)
-@app.get("/api/matters")
+@app.get("/api/matters", response_model=List[MatterResponse])
 def list_matters(client_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     query = db.query(Matter)
     if current_user.role == "client":
@@ -381,7 +440,7 @@ def list_matters(client_id: Optional[int] = None, db: Session = Depends(get_db),
         query = query.filter(Matter.client_id == client_id)
     return query.all()
 
-@app.post("/api/matters")
+@app.post("/api/matters", response_model=MatterResponse)
 def create_matter(matter_in: MatterCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     matter = Matter(**matter_in.dict())
     db.add(matter)
@@ -530,7 +589,7 @@ def check_legal_conflict(req: ConflictCheckRequest, db: Session = Depends(get_db
 
 
 # 4. COURT SCHEDULES & DEADLINES
-@app.get("/api/schedules")
+@app.get("/api/schedules", response_model=List[ScheduleResponse])
 def list_schedules(matter_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     query = db.query(Schedule)
     if current_user.role == "client":
@@ -546,7 +605,7 @@ def list_schedules(matter_id: Optional[int] = None, db: Session = Depends(get_db
         query = query.filter(Schedule.matter_id == matter_id)
     return query.order_by(Schedule.target_date.asc()).all()
 
-@app.post("/api/schedules")
+@app.post("/api/schedules", response_model=ScheduleResponse)
 def create_schedule(schedule_in: ScheduleCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     sch = Schedule(**schedule_in.dict())
     db.add(sch)
@@ -555,7 +614,7 @@ def create_schedule(schedule_in: ScheduleCreate, db: Session = Depends(get_db), 
     log_audit_trail(db, current_user.email, "CREATE", "schedules", str(sch.id))
     return sch
 
-@app.put("/api/schedules/{id}/complete")
+@app.put("/api/schedules/{id}/complete", response_model=ScheduleResponse)
 def complete_schedule(id: int, completed: bool = True, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     sch = db.query(Schedule).filter(Schedule.id == id).first()
     if not sch:
@@ -613,7 +672,7 @@ def process_uploaded_document_task(doc_id: int, file_path: str, db_session_facto
         db.commit()
         db.close()
 
-@app.post("/api/documents/upload")
+@app.post("/api/documents/upload", response_model=DocumentResponse)
 def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -658,7 +717,7 @@ def upload_document(
 
     return doc
 
-@app.get("/api/documents")
+@app.get("/api/documents", response_model=List[DocumentResponse])
 def list_documents(matter_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     query = db.query(Document)
     if current_user.role == "client":

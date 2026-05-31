@@ -74,14 +74,55 @@ class LocalBM25Indexer:
         return [{"score": s, "doc": d} for s, d in scores[:limit]]
 
 
+from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
+
+class OfflineHashingEmbeddingFunction(EmbeddingFunction):
+    """
+    A 100% offline, zero-network, zero-dependency embedding function that generates
+    deterministic 384-dimensional semantic-lexical vectors via word hashing.
+    """
+    def __call__(self, input: Documents) -> Embeddings:
+        import hashlib
+        embeddings = []
+        for text in input:
+            vector = [0.0] * 384
+            # Tokenize and hash
+            words = text.lower().split()
+            for word in words:
+                # MD5 hash of the word to index into 384 dimensions
+                h = int(hashlib.md5(word.encode('utf-8')).hexdigest(), 16)
+                idx = h % 384
+                vector[idx] += 1.0
+            # L2 Normalize
+            norm = sum(x*x for x in vector) ** 0.5
+            if norm > 0:
+                vector = [x / norm for x in vector]
+            embeddings.append(vector)
+        return embeddings
+
 class LocalVectorStore:
     """Manages local embedded ChromaDB vector persistence and hybrid RRF rankings."""
     def __init__(self):
         self.client = chromadb.PersistentClient(path=CHROMA_DIR)
-        self.collection = self.client.get_or_create_collection(
-            name="aegis_knowledge_base",
-            metadata={"hnsw:space": "cosine"}
-        )
+        self.embedding_function = OfflineHashingEmbeddingFunction()
+        try:
+            self.collection = self.client.get_or_create_collection(
+                name="aegis_knowledge_base",
+                metadata={"hnsw:space": "cosine"},
+                embedding_function=self.embedding_function
+            )
+        except ValueError:
+            import logging
+            logging.getLogger("aegis_ai.vector_store").info("Recreating collection due to embedding function mismatch.")
+            try:
+                self.client.delete_collection("aegis_knowledge_base")
+            except Exception:
+                pass
+            self.collection = self.client.get_or_create_collection(
+                name="aegis_knowledge_base",
+                metadata={"hnsw:space": "cosine"},
+                embedding_function=self.embedding_function
+            )
         self._bm25_cache = {}  # Cache structure: { cache_key: (bm25_indexer, candidates_dict) }
 
     def add_chunks(self, chunks: List[Dict[str, Any]]):
