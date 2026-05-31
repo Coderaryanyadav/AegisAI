@@ -254,6 +254,19 @@ export default function Home() {
   const [onlineModeSyncing, setOnlineModeSyncing] = useState(false);
   const [onlineModeResult, setOnlineModeResult] = useState<any>(null);
 
+  // Sync online mode state to backend so verify_offline_mode guard works
+  const syncOnlineMode = async (online: boolean) => {
+    try {
+      await fetchWithAuth(`${API_BASE}/api/system/connection-mode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ online })
+      });
+    } catch {
+      // Non-critical: frontend lock already works independently
+    }
+  };
+
   // RBAC Access Maps
   const ALLOWED_TABS: Record<string, string[]> = {
     admin: ["dashboard", "crm", "research", "analyzer", "auditor", "drafting", "billing", "analytics", "settings", "backup"],
@@ -1488,6 +1501,7 @@ export default function Home() {
               } else {
                 setIsOnlineMode(false);
                 setOnlineModeResult(null);
+                syncOnlineMode(false);
                 showNotification("🔒 Offline mode restored — local data unlocked.", "success");
               }
             }}
@@ -1547,6 +1561,7 @@ export default function Home() {
                 onClick={() => {
                   setIsOnlineMode(true);
                   setShowOnlineModeModal(false);
+                  syncOnlineMode(true);
                   showNotification("🌐 Online mode active — local data locked for security.", "info");
                 }}
                 className="flex-1 py-2.5 text-sm font-bold text-white bg-amber-600 hover:bg-amber-500 border border-amber-500 rounded-xl transition cursor-pointer"
@@ -1656,6 +1671,7 @@ export default function Home() {
               onClick={() => {
                 setIsOnlineMode(false);
                 setOnlineModeResult(null);
+                syncOnlineMode(false);
                 showNotification("🔒 Offline mode restored — local data unlocked.", "success");
               }}
               className="w-full py-3 font-bold text-sm text-white bg-rose-800/60 hover:bg-rose-700 border border-rose-700/60 rounded-xl transition cursor-pointer flex items-center justify-center gap-2"
