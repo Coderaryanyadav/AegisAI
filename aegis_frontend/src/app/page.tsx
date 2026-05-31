@@ -1,14 +1,54 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { 
   Shield, Scale, FileText, Calendar, Database, Search, 
   Trash2, Upload, AlertTriangle, Play, RefreshCw, Key, 
   Users, CheckSquare, Plus, Clock, FileDiff, Download, Info,
-  Lock
+  Lock, DollarSign, BarChart2, Mic, MicOff, Globe, TrendingUp,
+  MessageCircle, BookOpen, Zap, Settings, Bell
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000";
+
+// PDF export helper (jsPDF)
+const exportToPDF = (title: string, content: string) => {
+  try {
+    const { jsPDF } = require("jspdf");
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text(title, 14, 20);
+    doc.setFontSize(10);
+    const lines = doc.splitTextToSize(content, 180);
+    doc.text(lines, 14, 35);
+    doc.save(`${title.replace(/\s+/g, "_")}.pdf`);
+  } catch (e) {
+    alert("PDF export failed. Ensure jsPDF is installed.");
+  }
+};
+
+// Hindi translations
+const LANG: Record<string, Record<string, string>> = {
+  en: { billing: "Billing & Invoices", analytics: "Analytics", settings: "Settings", fir: "FIR Analyzer", predict: "Predict Outcome", voice: "Voice Dictation" },
+  hi: { billing: "बिलिंग और चालान", analytics: "विश्लेषण", settings: "सेटिंग्स", fir: "FIR विश्लेषक", predict: "परिणाम पूर्वानुमान", voice: "वॉयस डिक्टेशन" }
+};
+
+const LANDMARK_PRECEDENTS = [
+  { id: "kb", name: "Kesavananda Bharati v. State of Kerala", citation: "1973 SC", x: 200, y: 50, court: "Supreme Court", relevance: "Established the constitutional 'Basic Structure Doctrine' limiting amending powers." },
+  { id: "mg", name: "Maneka Gandhi v. Union of India", citation: "1978 SC", x: 100, y: 150, court: "Supreme Court", relevance: "Expanded Article 21 to require 'due process of law' rather than just procedure." },
+  { id: "mm", name: "Minerva Mills v. Union of India", citation: "1980 SC", x: 300, y: 150, court: "Supreme Court", relevance: "Ruled that judicial review is part of the basic structure of the constitution." },
+  { id: "lk", name: "Lalita Kumari v. State of UP", citation: "2014 SC", x: 50, y: 250, court: "Supreme Court", relevance: "Made registration of FIR mandatory for cognizable offenses." },
+  { id: "nj", name: "Navtej Singh Johar v. Union of India", citation: "2018 SC", x: 200, y: 250, court: "Supreme Court", relevance: "Decriminalized consensual sexual acts between same-sex adults." },
+  { id: "js", name: "Joseph Shine v. Union of India", citation: "2018 SC", x: 350, y: 250, court: "Supreme Court", relevance: "Struck down Section 497 of IPC (Adultery) as unconstitutional." }
+];
+
+const PRECEDENT_LINKS = [
+  { source: "kb", target: "mg" },
+  { source: "kb", target: "mm" },
+  { source: "mg", target: "nj" },
+  { source: "mg", target: "js" },
+  { source: "lk", target: "kb" }
+];
 
 export default function Home() {
   // Authentication State
@@ -115,11 +155,69 @@ export default function Home() {
   // Global Info / Error Notifications
   const [notification, setNotification] = useState<any>(null);
 
+  // Language toggle (en / hi)
+  const [lang, setLang] = useState<"en" | "hi">("en");
+  const t = (key: string) => LANG[lang]?.[key] || LANG["en"][key] || key;
+
+  // Billing / Invoice State
+  const [billingMatterId, setBillingMatterId] = useState<number | null>(null);
+  const [timeEntries, setTimeEntries] = useState<any[]>([]);
+  const [newTimeEntry, setNewTimeEntry] = useState({ description: "", hours: "1", rate_per_hour: "5000", date: new Date().toISOString().split("T")[0] });
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
+  const [billingTimer, setBillingTimer] = useState<any>(null); // { start: Date, running: bool }
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const timerRef = useRef<any>(null);
+
+  // Analytics State
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+
+  // 2FA State
+  const [twoFaEnabled, setTwoFaEnabled] = useState(false);
+  const [twoFaQr, setTwoFaQr] = useState("");
+  const [twoFaSecret, setTwoFaSecret] = useState("");
+  const [twoFaCode, setTwoFaCode] = useState("");
+  const [twoFaLoading, setTwoFaLoading] = useState(false);
+
+  // FIR Analyzer State
+  const [firDocIds, setFirDocIds] = useState<number[]>([]);
+  const [firResult, setFirResult] = useState<any>(null);
+  const [isFirAnalyzing, setIsFirAnalyzing] = useState(false);
+
+  // Predictive Outcome State
+  const [predictFacts, setPredictFacts] = useState("");
+  const [predictCourt, setPredictCourt] = useState("District Court");
+  const [predictSections, setPredictSections] = useState("");
+  const [predictResult, setPredictResult] = useState<any>(null);
+  const [isPredicting, setIsPredicting] = useState(false);
+
+  // Voice Dictation State
+  const [isRecording, setIsRecording] = useState(false);
+  const [transcribedText, setTranscribedText] = useState("");
+  const mediaRecorderRef = useRef<any>(null);
+  const audioChunksRef = useRef<any[]>([]);
+
+  // Annotations State
+  const [docAnnotations, setDocAnnotations] = useState<any[]>([]);
+  const [newAnnotationText, setNewAnnotationText] = useState("");
+  const [newAnnotationNote, setNewAnnotationNote] = useState("");
+  const [annotationColor, setAnnotationColor] = useState("yellow");
+  const [annotationDocId, setAnnotationDocId] = useState<number | null>(null);
+
+  // Hearing Notification State
+  const [upcomingAlerts, setUpcomingAlerts] = useState<any[]>([]);
+  const [showAlertsPanel, setShowAlertsPanel] = useState(false);
+
+  // Citation Graph Precedents State
+  const [selectedPrecedent, setSelectedPrecedent] = useState<any>(null);
+
   // RBAC Access Maps
   const ALLOWED_TABS: Record<string, string[]> = {
-    admin: ["dashboard", "crm", "research", "analyzer", "auditor", "drafting", "backup"],
-    lawyer: ["dashboard", "crm", "research", "analyzer", "drafting"],
-    auditor: ["auditor", "research"]
+    admin: ["dashboard", "crm", "research", "analyzer", "auditor", "drafting", "billing", "analytics", "settings", "backup"],
+    lawyer: ["dashboard", "crm", "research", "analyzer", "drafting", "billing", "analytics", "settings"],
+    auditor: ["auditor", "research", "analytics"],
+    client: ["dashboard", "billing", "settings"]
   };
 
   // Keep track of active tab legality under RBAC
@@ -132,6 +230,61 @@ export default function Home() {
       }
     }
   }, [currentUser, activeTab]);
+
+  // Hearing notification polling (every 5 minutes)
+  useEffect(() => {
+    if (!token) return;
+    const poll = async () => {
+      try {
+        const res = await fetchWithAuth(`${API_BASE}/api/system/upcoming-hearings?hours=48`);
+        if (res.ok) {
+          const data = await res.json();
+          setUpcomingAlerts(data);
+          if (data.length > 0 && "Notification" in window && Notification.permission === "granted") {
+            data.slice(0, 1).forEach((s: any) => {
+              const d = new Date(s.target_date);
+              const hoursLeft = Math.round((d.getTime() - Date.now()) / 3600000);
+              if (hoursLeft <= 24 && hoursLeft > 0) {
+                new Notification(`⚖️ Hearing in ${hoursLeft}h — ${s.title}`, { body: `${s.schedule_type} scheduled` });
+              }
+            });
+          }
+        }
+      } catch {}
+    };
+    poll();
+    const id = setInterval(poll, 300000);
+    return () => clearInterval(id);
+  }, [token]);
+
+  // Request notification permission
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  // Billing timer tick
+  useEffect(() => {
+    if (billingTimer?.running) {
+      timerRef.current = setInterval(() => setTimerSeconds(s => s + 1), 1000);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [billingTimer?.running]);
+
+  // Load lang from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("aegis_lang") as any;
+    if (saved) setLang(saved);
+  }, []);
+
+  const toggleLang = () => {
+    const next = lang === "en" ? "hi" : "en";
+    setLang(next);
+    localStorage.setItem("aegis_lang", next);
+  };
 
   // Initialization & Token Checks
   useEffect(() => {
@@ -180,7 +333,7 @@ export default function Home() {
   };
 
   // HTTP Helper wrapper
-  const fetchWithAuth = async (url, options = {}) => {
+  const fetchWithAuth = async (url: string, options: any = {}) => {
     const headers = options.headers || {};
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
@@ -524,6 +677,8 @@ export default function Home() {
     setPreviewText("");
     setShowPreviewModal(true);
     setPreviewLoading(true);
+    setAnnotationDocId(doc.id);
+    fetchAnnotations(doc.id);
     try {
       const response = await fetchWithAuth(`${API_BASE}/api/documents/${doc.id}/text`);
       if (response.ok) {
@@ -584,7 +739,7 @@ export default function Home() {
     setRagSources([]);
 
     try {
-      const body = {
+      const body: any = {
         query: searchQuery,
         model_name: selectedModel
       };
@@ -678,6 +833,241 @@ export default function Home() {
       setIsAuditing(false);
     }
   };
+
+  // ====== BILLING HANDLERS ======
+  const fetchTimeEntries = async (matterId: number) => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/billing/time-entries?matter_id=${matterId}`);
+      if (res.ok) setTimeEntries(await res.json());
+    } catch {}
+  };
+
+  const handleAddTimeEntry = async () => {
+    if (!billingMatterId || !newTimeEntry.description) return;
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/billing/time-entry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matter_id: billingMatterId, ...newTimeEntry })
+      });
+      if (res.ok) {
+        showNotification("Time entry logged", "success");
+        fetchTimeEntries(billingMatterId);
+        setNewTimeEntry({ description: "", hours: "1", rate_per_hour: "5000", date: new Date().toISOString().split("T")[0] });
+      }
+    } catch (e: any) { showNotification(e.message, "error"); }
+  };
+
+  const handleDeleteTimeEntry = async (id: number) => {
+    await fetchWithAuth(`${API_BASE}/api/billing/time-entry/${id}`, { method: "DELETE" });
+    if (billingMatterId) fetchTimeEntries(billingMatterId);
+  };
+
+  const handleGenerateInvoice = async () => {
+    if (!billingMatterId || !selectedClient) return;
+    setIsCreatingInvoice(true);
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/billing/invoice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: selectedClient.id, matter_id: billingMatterId })
+      });
+      if (res.ok) {
+        const inv = await res.json();
+        showNotification(`Invoice ${inv.invoice_number} generated!`, "success");
+        fetchInvoices();
+        // Auto PDF export
+        exportToPDF(
+          inv.invoice_number,
+          `INVOICE\n${inv.invoice_number}\nClient: ${selectedClient?.name}\nTotal: ₹${inv.total_amount}\nGST (18%): ₹${inv.gst_amount}\nGrand Total: ₹${inv.grand_total}\nStatus: ${inv.status}\nDate: ${new Date().toLocaleDateString("en-IN")}`
+        );
+      }
+    } catch (e: any) { showNotification(e.message, "error"); }
+    finally { setIsCreatingInvoice(false); }
+  };
+
+  const fetchInvoices = async () => {
+    try {
+      const url = selectedClient ? `${API_BASE}/api/billing/invoices?client_id=${selectedClient.id}` : `${API_BASE}/api/billing/invoices`;
+      const res = await fetchWithAuth(url);
+      if (res.ok) setInvoices(await res.json());
+    } catch {}
+  };
+
+  const startTimer = () => {
+    setTimerSeconds(0);
+    setBillingTimer({ running: true, start: Date.now() });
+  };
+  const stopTimer = () => {
+    setBillingTimer((t: any) => ({ ...t, running: false }));
+    const hours = (timerSeconds / 3600).toFixed(2);
+    setNewTimeEntry(prev => ({ ...prev, hours }));
+    showNotification(`Timer stopped: ${hours} hours logged`, "info");
+  };
+  const formatTimer = (s: number) => `${String(Math.floor(s/3600)).padStart(2,"0")}:${String(Math.floor((s%3600)/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+
+  // ====== ANALYTICS HANDLERS ======
+  const fetchAnalytics = async () => {
+    setAnalyticsLoading(true);
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/analytics/summary`);
+      if (res.ok) setAnalyticsData(await res.json());
+    } catch {}
+    finally { setAnalyticsLoading(false); }
+  };
+
+  // ====== 2FA HANDLERS ======
+  const handle2FASetup = async () => {
+    setTwoFaLoading(true);
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/2fa/setup`, { method: "POST" });
+      if (res.ok) {
+        const d = await res.json();
+        setTwoFaQr(d.qr_code_base64);
+        setTwoFaSecret(d.secret);
+      } else { showNotification("2FA setup failed", "error"); }
+    } catch (e: any) { showNotification(e.message, "error"); }
+    finally { setTwoFaLoading(false); }
+  };
+
+  const handle2FAEnable = async () => {
+    if (!twoFaCode) return;
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/2fa/enable`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ totp_code: twoFaCode })
+      });
+      if (res.ok) {
+        setTwoFaEnabled(true);
+        setTwoFaQr("");
+        showNotification("2FA enabled successfully!", "success");
+      } else { showNotification("Invalid TOTP code", "error"); }
+    } catch (e: any) { showNotification(e.message, "error"); }
+  };
+
+  const check2FAStatus = async () => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/2fa/status`);
+      if (res.ok) { const d = await res.json(); setTwoFaEnabled(d.enabled); }
+    } catch {}
+  };
+
+  // ====== FIR ANALYZER ======
+  const handleFIRAnalysis = async () => {
+    if (firDocIds.length === 0) { showNotification("Select at least one document", "warning"); return; }
+    setIsFirAnalyzing(true); setFirResult(null);
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/analyze/fir`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document_ids: firDocIds, model_name: selectedModel })
+      });
+      if (res.ok) { setFirResult(await res.json()); showNotification("FIR analysis complete", "success"); }
+      else { showNotification("FIR analysis failed", "error"); }
+    } catch (e: any) { showNotification(e.message, "error"); }
+    finally { setIsFirAnalyzing(false); }
+  };
+
+  // ====== PREDICTIVE OUTCOME ======
+  const handlePredictOutcome = async () => {
+    if (!predictFacts.trim()) { showNotification("Enter case facts", "warning"); return; }
+    setIsPredicting(true); setPredictResult(null);
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/analyze/predict-outcome`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ facts: predictFacts, court: predictCourt, sections: predictSections, model_name: selectedModel })
+      });
+      if (res.ok) { setPredictResult(await res.json()); showNotification("Prediction complete", "success"); }
+      else { showNotification("Prediction failed", "error"); }
+    } catch (e: any) { showNotification(e.message, "error"); }
+    finally { setIsPredicting(false); }
+  };
+
+  // ====== VOICE DICTATION ======
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      mr.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+      mr.onstop = async () => {
+        const blob = new Blob(audioChunksRef.current, { type: "audio/wav" });
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const b64 = (reader.result as string).split(",")[1];
+          try {
+            const res = await fetchWithAuth(`${API_BASE}/api/analyze/transcribe`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ audio_base64: b64, language: lang })
+            });
+            if (res.ok) {
+              const d = await res.json();
+              setTranscribedText(prev => prev + " " + (d.transcript || ""));
+              if (d.warning) showNotification(d.warning, "warning");
+              else showNotification("Transcribed!", "success");
+            }
+          } catch (e: any) { showNotification(e.message, "error"); }
+        };
+        reader.readAsDataURL(blob);
+        stream.getTracks().forEach(t => t.stop());
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setIsRecording(true);
+    } catch {
+      showNotification("Microphone access denied", "error");
+    }
+  };
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setIsRecording(false);
+  };
+
+  // ====== WHATSAPP ======
+  const handleWhatsAppReminder = async (scheduleId: number) => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/whatsapp/reminder/${scheduleId}`);
+      if (res.ok) {
+        const d = await res.json();
+        window.open(d.whatsapp_url, "_blank");
+      }
+    } catch (e: any) { showNotification(e.message, "error"); }
+  };
+
+  // ====== ANNOTATIONS ======
+  const fetchAnnotations = async (docId: number) => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/annotations/${docId}`);
+      if (res.ok) setDocAnnotations(await res.json());
+    } catch {}
+  };
+
+  const handleSaveAnnotation = async () => {
+    if (!annotationDocId || !newAnnotationText.trim()) return;
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/annotations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document_id: annotationDocId, selected_text: newAnnotationText, note: newAnnotationNote, color: annotationColor })
+      });
+      if (res.ok) {
+        showNotification("Annotation saved!", "success");
+        fetchAnnotations(annotationDocId);
+        setNewAnnotationText(""); setNewAnnotationNote("");
+      }
+    } catch (e: any) { showNotification(e.message, "error"); }
+  };
+
+  const handleDeleteAnnotation = async (id: number) => {
+    await fetchWithAuth(`${API_BASE}/api/annotations/${id}`, { method: "DELETE" });
+    if (annotationDocId) fetchAnnotations(annotationDocId);
+  };
+
+
+  // ====== EXISTING HANDLERS BELOW ======
 
   // Simplify Clause Call
   const handleSimplifyClause = async () => {
@@ -969,6 +1359,7 @@ export default function Home() {
                   <option value="lawyer">Advocate / Lawyer</option>
                   <option value="admin">Administrator (DB/Restore)</option>
                   <option value="auditor">Audit Officer</option>
+                  <option value="client">Client (Read-Only Portal)</option>
                 </select>
               </div>
             )}
@@ -1056,7 +1447,7 @@ export default function Home() {
         {/* Left Navigation Sidebar */}
         <aside className="w-64 border-r border-zinc-900/80 glass-panel p-4 flex flex-col justify-between hidden md:flex">
           <div className="space-y-1">
-            {(currentUser?.role === "admin" || currentUser?.role === "lawyer") && (
+            {(currentUser?.role === "admin" || currentUser?.role === "lawyer" || currentUser?.role === "client") && (
               <button 
                 onClick={() => setActiveTab("dashboard")}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "dashboard" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
@@ -1108,8 +1499,33 @@ export default function Home() {
                 Document Draftsman
               </button>
             )}
+            {(currentUser?.role === "admin" || currentUser?.role === "lawyer" || currentUser?.role === "client") && (
+              <button
+                onClick={() => { setActiveTab("billing"); if (selectedMatter) { setBillingMatterId(selectedMatter.id); fetchTimeEntries(selectedMatter.id); fetchInvoices(); } }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "billing" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
+              >
+                <DollarSign className="w-4 h-4" />
+                {lang === "hi" ? "बिलिंग" : "Billing & Invoices"}
+              </button>
+            )}
+            {(currentUser?.role === "admin" || currentUser?.role === "lawyer") && (
+              <button
+                onClick={() => { setActiveTab("analytics"); fetchAnalytics(); }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "analytics" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
+              >
+                <BarChart2 className="w-4 h-4" />
+                {lang === "hi" ? "विश्लेषण" : "Analytics"}
+              </button>
+            )}
+            <button
+              onClick={() => { setActiveTab("settings"); check2FAStatus(); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "settings" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
+            >
+              <Settings className="w-4 h-4" />
+              {lang === "hi" ? "सेटिंग्स" : "Settings"}
+            </button>
             {currentUser?.role === "admin" && (
-              <button 
+              <button
                 onClick={() => setActiveTab("backup")}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "backup" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
@@ -1240,56 +1656,58 @@ export default function Home() {
               </div>
 
               {/* Court Cause List PDF Auto-Scheduler Widget */}
-              <div className="border border-zinc-900 bg-zinc-950/40 p-5 rounded-2xl space-y-4">
-                <div>
-                  <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-zinc-400" /> Court Cause List Auto-Scheduler
-                  </h3>
-                  <p className="text-xs text-zinc-500 mt-1">Upload your daily cause list PDF. AegisAI parses it offline, matches case numbers against your matters, and schedules hearings automatically.</p>
-                </div>
-                
-                <div className="flex flex-col sm:flex-row gap-4 items-center">
-                  <div className="relative border-2 border-dashed border-zinc-900 rounded-xl p-6 text-center hover:border-zinc-800 transition w-full flex-1 cursor-pointer">
-                    <input 
-                      type="file" 
-                      onChange={handleCauseListUpload}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                      accept=".pdf"
-                      disabled={causeListUploadLoading}
-                    />
-                    {causeListUploadLoading ? (
-                      <div className="text-xs text-zinc-400 flex items-center justify-center gap-2">
-                        <RefreshCw className="w-4 h-4 animate-spin text-zinc-500" /> Scanning Cause List & auto-scheduling matching hearings...
-                      </div>
-                    ) : (
-                      <div className="text-xs text-zinc-300">
-                        <Upload className="w-6 h-6 text-zinc-500 mx-auto mb-1.5" />
-                        <span>Select daily Court Cause List PDF</span>
-                      </div>
-                    )}
+              {currentUser?.role !== "client" && (
+                <div className="border border-zinc-900 bg-zinc-950/40 p-5 rounded-2xl space-y-4">
+                  <div>
+                    <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-zinc-400" /> Court Cause List Auto-Scheduler
+                    </h3>
+                    <p className="text-xs text-zinc-500 mt-1">Upload your daily cause list PDF. AegisAI parses it offline, matches case numbers against your matters, and schedules hearings automatically.</p>
                   </div>
-                </div>
-
-                {causeListMatches.length > 0 && (
-                  <div className="space-y-2 pt-1">
-                    <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono">Auto-Scheduled Hearings Matching Your Matters</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[180px] overflow-y-auto">
-                      {causeListMatches.map((m, idx) => (
-                        <div key={idx} className="p-3 bg-emerald-950/20 border border-emerald-900/60 rounded-xl text-xs flex flex-col justify-between">
-                          <div>
-                            <div className="font-bold text-emerald-400 font-mono">{m.case_number}</div>
-                            <div className="text-zinc-200 font-medium mt-0.5">{m.title}</div>
-                          </div>
-                          <div className="text-[10px] text-emerald-500 font-mono mt-1.5 flex justify-between">
-                            <span>Date: {m.target_date}</span>
-                            <span>{m.already_scheduled ? "Already Scheduled" : "Scheduled Successfully"}</span>
-                          </div>
+                  
+                  <div className="flex flex-col sm:flex-row gap-4 items-center">
+                    <div className="relative border-2 border-dashed border-zinc-900 rounded-xl p-6 text-center hover:border-zinc-800 transition w-full flex-1 cursor-pointer">
+                      <input 
+                        type="file" 
+                        onChange={handleCauseListUpload}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        accept=".pdf"
+                        disabled={causeListUploadLoading}
+                      />
+                      {causeListUploadLoading ? (
+                        <div className="text-xs text-zinc-400 flex items-center justify-center gap-2">
+                          <RefreshCw className="w-4 h-4 animate-spin text-zinc-500" /> Scanning Cause List & auto-scheduling matching hearings...
                         </div>
-                      ))}
+                      ) : (
+                        <div className="text-xs text-zinc-300">
+                          <Upload className="w-6 h-6 text-zinc-500 mx-auto mb-1.5" />
+                          <span>Select daily Court Cause List PDF</span>
+                        </div>
+                      )}
                     </div>
                   </div>
-                )}
-              </div>
+
+                  {causeListMatches.length > 0 && (
+                    <div className="space-y-2 pt-1">
+                      <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono">Auto-Scheduled Hearings Matching Your Matters</h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[180px] overflow-y-auto">
+                        {causeListMatches.map((m, idx) => (
+                          <div key={idx} className="p-3 bg-emerald-950/20 border border-emerald-900/60 rounded-xl text-xs flex flex-col justify-between">
+                            <div>
+                              <div className="font-bold text-emerald-400 font-mono">{m.case_number}</div>
+                              <div className="text-zinc-200 font-medium mt-0.5">{m.title}</div>
+                            </div>
+                            <div className="text-[10px] text-emerald-500 font-mono mt-1.5 flex justify-between">
+                              <span>Date: {m.target_date}</span>
+                              <span>{m.already_scheduled ? "Already Scheduled" : "Scheduled Successfully"}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Dynamic Context Documents Ingestor */}
               {selectedMatter && (
@@ -1298,17 +1716,23 @@ export default function Home() {
                   {/* File Vault Uploader */}
                   <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
                     <h3 className="text-sm font-bold text-zinc-200">Ingest Document Evidence</h3>
-                    <div className="border-2 border-dashed border-zinc-800 rounded-xl p-8 text-center hover:border-zinc-700 transition relative">
-                      <input 
-                        type="file" 
-                        onChange={handleUploadDocument}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                        accept=".pdf,.txt"
-                      />
-                      <Upload className="w-8 h-8 text-zinc-500 mx-auto mb-2" />
-                      <span className="text-xs text-zinc-300 block font-medium">Click to select files or drag-and-drop</span>
-                      <span className="text-[10px] text-zinc-500 block mt-1">Supports PDF, TXT (Max 50MB)</span>
-                    </div>
+                    {currentUser?.role !== "client" ? (
+                      <div className="border-2 border-dashed border-zinc-800 rounded-xl p-8 text-center hover:border-zinc-700 transition relative">
+                        <input 
+                          type="file" 
+                          onChange={handleUploadDocument}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          accept=".pdf,.txt"
+                        />
+                        <Upload className="w-8 h-8 text-zinc-500 mx-auto mb-2" />
+                        <span className="text-xs text-zinc-300 block font-medium">Click to select files or drag-and-drop</span>
+                        <span className="text-[10px] text-zinc-500 block mt-1">Supports PDF, TXT (Max 50MB)</span>
+                      </div>
+                    ) : (
+                      <div className="p-4 border border-zinc-800 rounded-lg text-xs text-zinc-500 italic text-center">
+                        Document uploads disabled in read-only portal view.
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Scoped Document Context Vault</h4>
@@ -1334,12 +1758,14 @@ export default function Home() {
                                   <FileText className="w-3.5 h-3.5" />
                                 </button>
                               )}
-                              <button 
-                                onClick={() => handleDeleteDocument(d.id)}
-                                className="text-zinc-500 hover:text-rose-400 p-1 transition"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {currentUser?.role !== "client" && (
+                                <button 
+                                  onClick={() => handleDeleteDocument(d.id)}
+                                  className="text-zinc-500 hover:text-rose-400 p-1 transition"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -1356,38 +1782,44 @@ export default function Home() {
                       <h3 className="text-sm font-bold text-zinc-200">Court Deadlines & Hearings</h3>
                     </div>
 
-                    <form onSubmit={handleCreateSchedule} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <input 
-                        type="text" 
-                        value={newSchedule.title}
-                        onChange={(e) => setNewSchedule({ ...newSchedule, title: e.target.value })}
-                        placeholder="E.g., File Rejoinder Affidavit"
-                        className="p-2.5 text-xs rounded-lg glass-input text-zinc-200 w-full"
-                        required
-                      />
-                      <select 
-                        value={newSchedule.schedule_type}
-                        onChange={(e) => setNewSchedule({ ...newSchedule, schedule_type: e.target.value })}
-                        className="p-2.5 text-xs rounded-lg glass-input text-zinc-300"
-                      >
-                        <option value="hearing">Court Hearing</option>
-                        <option value="deadline">Filing Deadline</option>
-                        <option value="meeting">Client Meeting</option>
-                      </select>
-                      <input 
-                        type="date" 
-                        value={newSchedule.target_date}
-                        onChange={(e) => setNewSchedule({ ...newSchedule, target_date: e.target.value })}
-                        className="p-2.5 text-xs rounded-lg glass-input text-zinc-300 w-full"
-                        required
-                      />
-                      <button 
-                        type="submit"
-                        className="p-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-950 font-medium rounded-lg text-xs flex items-center justify-center gap-1 shadow transition"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Add Task
-                      </button>
-                    </form>
+                    {currentUser?.role !== "client" ? (
+                      <form onSubmit={handleCreateSchedule} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <input 
+                          type="text" 
+                          value={newSchedule.title}
+                          onChange={(e) => setNewSchedule({ ...newSchedule, title: e.target.value })}
+                          placeholder="E.g., File Rejoinder Affidavit"
+                          className="p-2.5 text-xs rounded-lg glass-input text-zinc-200 w-full bg-zinc-950"
+                          required
+                        />
+                        <select 
+                          value={newSchedule.schedule_type}
+                          onChange={(e) => setNewSchedule({ ...newSchedule, schedule_type: e.target.value })}
+                          className="p-2.5 text-xs rounded-lg glass-input text-zinc-300 bg-zinc-950"
+                        >
+                          <option value="hearing">Court Hearing</option>
+                          <option value="deadline">Filing Deadline</option>
+                          <option value="meeting">Client Meeting</option>
+                        </select>
+                        <input 
+                          type="date" 
+                          value={newSchedule.target_date}
+                          onChange={(e) => setNewSchedule({ ...newSchedule, target_date: e.target.value })}
+                          className="p-2.5 text-xs rounded-lg glass-input text-zinc-300 w-full bg-zinc-950"
+                          required
+                        />
+                        <button 
+                          type="submit"
+                          className="p-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-950 font-medium rounded-lg text-xs flex items-center justify-center gap-1 shadow transition cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add Task
+                        </button>
+                      </form>
+                    ) : (
+                      <div className="p-3 border border-zinc-800 rounded-lg text-xs text-zinc-500 italic text-center">
+                        Task creation disabled in read-only portal view.
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       <div className="space-y-1.5 max-h-[220px] overflow-y-auto">
@@ -1398,7 +1830,8 @@ export default function Home() {
                                 type="checkbox"
                                 checked={s.is_completed}
                                 onChange={(e) => handleToggleSchedule(s.id, e.target.checked)}
-                                className="w-3.5 h-3.5 rounded border-zinc-800 text-zinc-100 accent-zinc-800 focus:ring-0"
+                                disabled={currentUser?.role === "client"}
+                                className="w-3.5 h-3.5 rounded border-zinc-800 text-zinc-100 accent-zinc-800 focus:ring-0 disabled:opacity-50"
                               />
                               <div className={s.is_completed ? "line-through text-zinc-500" : "text-zinc-300"}>
                                 <div className="font-semibold">{s.title}</div>
@@ -1408,6 +1841,10 @@ export default function Home() {
                                 </div>
                               </div>
                             </div>
+                            <button onClick={() => handleWhatsAppReminder(s.id)} title="Send WhatsApp Reminder"
+                              className="text-emerald-600 hover:text-emerald-400 transition shrink-0">
+                              <MessageCircle className="w-4 h-4" />
+                            </button>
                           </div>
                         ))}
                         {schedules.length === 0 && (
@@ -1421,7 +1858,7 @@ export default function Home() {
               )}
 
               {/* Add New Case Matter Form */}
-              {selectedClient && (
+              {selectedClient && currentUser?.role !== "client" && (
                 <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
                   <h3 className="text-sm font-bold text-zinc-200">Open New Matter File for {selectedClient.name}</h3>
                   <form onSubmit={handleCreateMatter} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1784,6 +2221,112 @@ export default function Home() {
                       </div>
                     )}
                   </div>
+
+                  {/* Precedent Mapping & Case Citation Graph */}
+                  <div className="border border-zinc-900 bg-zinc-950/40 p-6 rounded-2xl space-y-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 text-zinc-400" /> Landmark Precedent & Case Citation Network
+                      </h3>
+                      <p className="text-xs text-zinc-500 mt-1">
+                        Interactive precedent citation map. Click on any case node to explore judicial holdings, citations, and authority levels.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* SVG Canvas (left 2 cols) */}
+                      <div className="md:col-span-2 relative bg-zinc-950/60 rounded-xl border border-zinc-900 overflow-hidden flex items-center justify-center p-4">
+                        <svg viewBox="0 0 400 300" className="w-full h-auto max-h-[300px]">
+                          <defs>
+                            <marker id="arrow" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                              <path d="M 0 0 L 10 5 L 0 10 z" fill="#3f3f46" />
+                            </marker>
+                          </defs>
+
+                          {/* Render links */}
+                          {PRECEDENT_LINKS.map((link, idx) => {
+                            const sourceNode = LANDMARK_PRECEDENTS.find(p => p.id === link.source);
+                            const targetNode = LANDMARK_PRECEDENTS.find(p => p.id === link.target);
+                            if (!sourceNode || !targetNode) return null;
+                            return (
+                              <line 
+                                key={idx} 
+                                x1={sourceNode.x} 
+                                y1={sourceNode.y} 
+                                x2={targetNode.x} 
+                                y2={targetNode.y} 
+                                stroke="#27272a" 
+                                strokeWidth="1.5" 
+                                markerEnd="url(#arrow)" 
+                              />
+                            );
+                          })}
+
+                          {/* Render nodes */}
+                          {LANDMARK_PRECEDENTS.map((node) => (
+                            <g 
+                              key={node.id} 
+                              className="cursor-pointer group"
+                              onClick={() => setSelectedPrecedent(node)}
+                            >
+                              <circle 
+                                cx={node.x} 
+                                cy={node.y} 
+                                r="10" 
+                                className={`transition-all duration-300 ${selectedPrecedent?.id === node.id ? "stroke-white stroke-2 scale-110" : "stroke-zinc-800 hover:stroke-zinc-400"}`}
+                                fill={node.id === "kb" ? "#eab308" : node.id === "mg" || node.id === "mm" ? "#3b82f6" : "#71717a"} 
+                              />
+                              <text 
+                                x={node.x} 
+                                y={node.y - 14} 
+                                textAnchor="middle" 
+                                className="text-[8px] font-mono font-bold fill-zinc-400 group-hover:fill-zinc-100 transition-colors pointer-events-none"
+                              >
+                                {node.citation}
+                              </text>
+                            </g>
+                          ))}
+                        </svg>
+
+                        {/* Legend */}
+                        <div className="absolute bottom-2 left-2 flex gap-3 text-[9px] text-zinc-500 font-mono bg-zinc-950/80 px-2 py-1 rounded border border-zinc-900/60">
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-500" /> Basic Structure</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> Constitutional SC</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-zinc-500" /> Precedents</span>
+                        </div>
+                      </div>
+
+                      {/* Detail View (right 1 col) */}
+                      <div className="p-4 bg-zinc-900/30 border border-zinc-900 rounded-xl flex flex-col justify-between text-xs min-h-[200px]">
+                        {selectedPrecedent ? (
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-start">
+                              <h4 className="font-bold text-zinc-200 leading-tight">{selectedPrecedent.name}</h4>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="px-1.5 py-0.5 bg-zinc-805 border border-zinc-800 rounded font-mono text-[9px] text-zinc-400 uppercase">{selectedPrecedent.court}</span>
+                              <span className="px-1.5 py-0.5 bg-zinc-805 rounded font-mono text-[9px] text-amber-400 border border-zinc-800">{selectedPrecedent.citation}</span>
+                            </div>
+                            <p className="text-zinc-400 leading-relaxed text-[11px] pt-1">
+                              {selectedPrecedent.relevance}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="text-zinc-500 italic flex items-center justify-center h-full text-center p-4">
+                            Click a node on the citation network to view legal authority details.
+                          </div>
+                        )}
+                        {selectedPrecedent && (
+                          <button 
+                            onClick={() => setSelectedPrecedent(null)} 
+                            className="mt-3 w-full py-1.5 bg-zinc-950 border border-zinc-900 hover:bg-zinc-900 text-zinc-400 hover:text-zinc-200 transition text-[10px] rounded-lg font-mono cursor-pointer"
+                          >
+                            Clear View
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Right statutory conversion sidebar */}
@@ -1901,6 +2444,263 @@ export default function Home() {
                 </div>
               )}
 
+              {/* ===== AI ANALYSIS TOOLKIT ===== */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* FIR Analyzer */}
+                <div className="border border-rose-900/40 bg-rose-950/10 p-5 rounded-xl space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-rose-400">🚨</span>
+                    <h3 className="text-sm font-bold text-rose-300">FIR / Criminal Analyzer</h3>
+                  </div>
+                  <p className="text-[11px] text-zinc-400">Detect contradictions across FIR, medical report & witness statements. Finds defense points automatically.</p>
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-zinc-500 uppercase font-bold">Select documents to analyze:</p>
+                    {documents.map(d => (
+                      <label key={d.id} className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                        <input type="checkbox" checked={firDocIds.includes(d.id)}
+                          onChange={e => setFirDocIds(prev => e.target.checked ? [...prev, d.id] : prev.filter(x => x !== d.id))}
+                          className="accent-rose-600" />
+                        {d.original_name}
+                      </label>
+                    ))}
+                  </div>
+                  <button onClick={handleFIRAnalysis} disabled={isFirAnalyzing || firDocIds.length === 0}
+                    className="w-full py-2 bg-rose-800 hover:bg-rose-700 text-white font-semibold rounded-lg text-xs transition disabled:opacity-50">
+                    {isFirAnalyzing ? <span className="flex items-center justify-center gap-2"><RefreshCw className="w-3 h-3 animate-spin" /> Analyzing...</span> : "🔍 Analyze Criminal Docs"}
+                  </button>
+                </div>
+
+                {/* Predictive Outcome */}
+                <div className="border border-blue-900/40 bg-blue-950/10 p-5 rounded-xl space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-blue-400">⚖️</span>
+                    <h3 className="text-sm font-bold text-blue-300">Case Outcome Predictor</h3>
+                  </div>
+                  <p className="text-[11px] text-zinc-400">AI-powered verdict prediction with Indian precedent analysis, risk factors, and confidence score.</p>
+                  <textarea value={predictFacts} onChange={e => setPredictFacts(e.target.value)} rows={3}
+                    placeholder="Paste key case facts here..." className="w-full p-2 text-xs rounded-lg glass-input text-zinc-200 resize-none" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={predictCourt} onChange={e => setPredictCourt(e.target.value)} className="p-2 text-xs rounded-lg glass-input text-zinc-300">
+                      {["Supreme Court", "High Court", "District Court", "Sessions Court", "Consumer Forum", "Tribunal"].map(c => <option key={c}>{c}</option>)}
+                    </select>
+                    <input value={predictSections} onChange={e => setPredictSections(e.target.value)} placeholder="BNS sections (opt.)" className="p-2 text-xs rounded-lg glass-input text-zinc-200" />
+                  </div>
+                  <button onClick={handlePredictOutcome} disabled={isPredicting || !predictFacts.trim()}
+                    className="w-full py-2 bg-blue-800 hover:bg-blue-700 text-white font-semibold rounded-lg text-xs transition disabled:opacity-50">
+                    {isPredicting ? <span className="flex items-center justify-center gap-2"><RefreshCw className="w-3 h-3 animate-spin" /> Predicting...</span> : "🎯 Predict Outcome"}
+                  </button>
+                </div>
+
+                {/* Voice Dictation */}
+                <div className="border border-violet-900/40 bg-violet-950/10 p-5 rounded-xl space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-violet-400">🎙️</span>
+                    <h3 className="text-sm font-bold text-violet-300">Voice Dictation</h3>
+                  </div>
+                  <p className="text-[11px] text-zinc-400">Record audio to transcribe notes, client statements, or case summaries using local Whisper AI.</p>
+                  <div className="flex justify-center">
+                    <button onClick={isRecording ? stopRecording : startRecording}
+                      className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-200 shadow-lg ${isRecording ? "bg-rose-600 animate-pulse scale-110" : "bg-violet-700 hover:bg-violet-600"}`}>
+                      {isRecording ? <MicOff className="w-8 h-8 text-white" /> : <Mic className="w-8 h-8 text-white" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-center text-zinc-500">{isRecording ? "🔴 Recording... click to stop" : "Click mic to start recording"}</p>
+                  {transcribedText && (
+                    <div className="p-2 bg-violet-950/30 border border-violet-800 rounded-lg">
+                      <p className="text-[10px] text-zinc-500 uppercase font-bold mb-1">Transcript</p>
+                      <p className="text-xs text-zinc-200 whitespace-pre-wrap">{transcribedText}</p>
+                      <button onClick={() => setTranscribedText("")} className="text-[10px] text-zinc-500 hover:text-zinc-300 mt-1">Clear</button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ===== AI ANALYSIS TOOLKIT RESULTS ===== */}
+              {(firResult || predictResult) && (
+                <div className="grid grid-cols-1 gap-6">
+                  {/* FIR Result */}
+                  {firResult && (
+                    <div className="border border-rose-900/50 bg-rose-950/5 p-6 rounded-xl space-y-4 animate-fade-in">
+                      <div className="flex justify-between items-center border-b border-rose-900/40 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-rose-400">🚨</span>
+                          <h3 className="text-md font-bold text-rose-300">FIR & Criminal Contradiction Report</h3>
+                        </div>
+                        <button 
+                          onClick={() => {
+                            const content = `FIR & CRIMINAL CONTRADICTION REPORT\n\nOVERVIEW:\n${firResult.case_overview}\n\nCONTRADICTIONS:\n${firResult.contradictions?.map((c: any) => `- [${c.severity}] ${c.document_a} vs ${c.document_b}: ${c.contradiction_detail}`).join("\n")}\n\nDEFENSE POINTS:\n${firResult.defense_points?.map((d: any) => `- [Strength: ${d.strength}] ${d.point} (${d.legal_basis})`).join("\n")}\n\nGAPS IN EVIDENCE:\n${firResult.missing_evidence?.map((g: string) => `- ${g}`).join("\n")}\n\nAPPLICABLE BNS SECTIONS:\n${firResult.applicable_sections_bns?.join(", ")}`;
+                            exportToPDF("FIR_Contradiction_Report", content);
+                          }}
+                          className="px-3 py-1.5 bg-rose-900/50 hover:bg-rose-800 border border-rose-800 text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Export PDF
+                        </button>
+                      </div>
+
+                      <div className="space-y-3 text-xs">
+                        <div>
+                          <strong className="text-zinc-400 block mb-1">Case Overview:</strong>
+                          <p className="text-zinc-300 leading-relaxed bg-zinc-950/40 p-3 rounded-lg border border-zinc-900">{firResult.case_overview}</p>
+                        </div>
+
+                        {firResult.fir_timeline && firResult.fir_timeline.length > 0 && (
+                          <div>
+                            <strong className="text-zinc-400 block mb-1">Extracted FIR Timeline:</strong>
+                            <div className="space-y-1.5 bg-zinc-950/40 p-3 rounded-lg border border-zinc-900">
+                              {firResult.fir_timeline.map((item: any, i: number) => (
+                                <div key={i} className="flex gap-2 text-zinc-300">
+                                  <span className="text-rose-500 font-mono">[{item.timestamp || "TBD"}]</span>
+                                  <span>{item.event} <span className="text-zinc-500 font-mono">({item.source})</span></span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {firResult.contradictions && firResult.contradictions.length > 0 && (
+                          <div>
+                            <strong className="text-zinc-400 block mb-1">Contradictions Detected:</strong>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {firResult.contradictions.map((c: any, i: number) => (
+                                <div key={i} className="p-3 bg-zinc-950/40 border rounded-lg border-zinc-900 space-y-1">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-[10px] font-bold text-zinc-500">{c.document_a} &harr; {c.document_b}</span>
+                                    <span className={`text-[9px] px-1 rounded font-bold ${c.severity === "High" ? "bg-rose-950 text-rose-400 border border-rose-900" : c.severity === "Medium" ? "bg-amber-950 text-amber-400 border border-amber-900" : "bg-zinc-800 text-zinc-400"}`}>{c.severity}</span>
+                                  </div>
+                                  <p className="text-zinc-300">{c.contradiction_detail}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {firResult.defense_points && firResult.defense_points.length > 0 && (
+                          <div>
+                            <strong className="text-zinc-400 block mb-1">Recommended Defense Points:</strong>
+                            <div className="space-y-2">
+                              {firResult.defense_points.map((d: any, i: number) => (
+                                <div key={i} className="p-3 bg-rose-950/5 border border-rose-900/30 rounded-lg">
+                                  <div className="flex justify-between font-semibold text-zinc-200">
+                                    <span>{d.point}</span>
+                                    <span className="text-[10px] text-rose-400">Strength: {d.strength}</span>
+                                  </div>
+                                  <p className="text-zinc-400 mt-1 text-[11px]">Legal Basis: {d.legal_basis}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {firResult.missing_evidence && firResult.missing_evidence.length > 0 && (
+                            <div>
+                              <strong className="text-zinc-400 block mb-1">Gaps in Evidence / Investigation:</strong>
+                              <ul className="list-disc list-inside space-y-1 text-zinc-300">
+                                {firResult.missing_evidence.map((g: string, i: number) => <li key={i}>{g}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                          {firResult.applicable_sections_bns && firResult.applicable_sections_bns.length > 0 && (
+                            <div>
+                              <strong className="text-zinc-400 block mb-1">Applicable Sections (BNS):</strong>
+                              <div className="flex gap-1.5 flex-wrap">
+                                {firResult.applicable_sections_bns.map((s: string, i: number) => (
+                                  <span key={i} className="px-2 py-0.5 bg-rose-950/40 border border-rose-900 text-rose-300 rounded font-mono font-semibold">{s}</span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Outcome Prediction Result */}
+                  {predictResult && (
+                    <div className="border border-blue-900/50 bg-blue-950/5 p-6 rounded-xl space-y-4 animate-fade-in">
+                      <div className="flex justify-between items-center border-b border-blue-900/40 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-blue-400">🎯</span>
+                          <h3 className="text-md font-bold text-blue-300">Case Verdict Outcome Prediction</h3>
+                        </div>
+                        <button 
+                          onClick={() => {
+                            const content = `CASE OUTCOME PREDICTION REPORT\n\nPREDICTED OUTCOME: ${predictResult.predicted_outcome} (${predictResult.confidence_percentage}% Confidence)\n\nREASONING:\n${predictResult.reasoning?.map((r: string) => `- ${r}`).join("\n")}\n\nRISK FACTORS:\n${predictResult.risk_factors?.map((rf: string) => `- ${rf}`).join("\n")}\n\nSUGGESTIONS:\n${predictResult.strengthening_suggestions?.map((s: string) => `- ${s}`).join("\n")}\n\nPRECEDENTS:\n${predictResult.similar_precedents?.map((p: any) => `- ${p.case_name} (${p.citation}): ${p.relevance}`).join("\n")}\n\nESTIMATED TIMELINE: ${predictResult.estimated_timeline_months} months`;
+                            exportToPDF("Case_Prediction_Report", content);
+                          }}
+                          className="px-3 py-1.5 bg-blue-900/50 hover:bg-blue-800 border border-blue-800 text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Export PDF
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="p-4 bg-zinc-950/40 border border-zinc-900 rounded-xl text-center space-y-1">
+                          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider font-mono">Predicted Outcome</span>
+                          <p className={`text-sm font-bold uppercase ${predictResult.predicted_outcome === "Likely to Succeed" ? "text-emerald-400" : predictResult.predicted_outcome === "Likely to Fail" ? "text-rose-400" : "text-amber-400"}`}>{predictResult.predicted_outcome}</p>
+                        </div>
+                        <div className="p-4 bg-zinc-950/40 border border-zinc-900 rounded-xl text-center space-y-1">
+                          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider font-mono">AI Confidence Rating</span>
+                          <p className="text-xl font-bold font-mono text-blue-400">{predictResult.confidence_percentage}%</p>
+                        </div>
+                        <div className="p-4 bg-zinc-950/40 border border-zinc-900 rounded-xl text-center space-y-1">
+                          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider font-mono">Estimated Timeline</span>
+                          <p className="text-xl font-bold font-mono text-zinc-300">{predictResult.estimated_timeline_months} mos</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 text-xs">
+                        {predictResult.reasoning && predictResult.reasoning.length > 0 && (
+                          <div>
+                            <strong className="text-zinc-400 block mb-1">Key Legal Reasoning:</strong>
+                            <ul className="list-decimal list-inside space-y-1 text-zinc-300 leading-relaxed bg-zinc-950/40 p-3 rounded-lg border border-zinc-900">
+                              {predictResult.reasoning.map((r: string, i: number) => <li key={i}>{r}</li>)}
+                            </ul>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {predictResult.risk_factors && predictResult.risk_factors.length > 0 && (
+                            <div className="p-3.5 bg-rose-950/5 border border-rose-900/20 rounded-xl">
+                              <strong className="text-rose-300 block mb-1.5">Identified Risk Factors:</strong>
+                              <ul className="list-disc list-inside space-y-1.5 text-zinc-400 text-[11px]">
+                                {predictResult.risk_factors.map((rf: string, i: number) => <li key={i}>{rf}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                          {predictResult.strengthening_suggestions && predictResult.strengthening_suggestions.length > 0 && (
+                            <div className="p-3.5 bg-emerald-950/5 border border-emerald-900/20 rounded-xl">
+                              <strong className="text-emerald-300 block mb-1.5">Action Items to Strengthen Case:</strong>
+                              <ul className="list-disc list-inside space-y-1.5 text-zinc-400 text-[11px]">
+                                {predictResult.strengthening_suggestions.map((s: string, i: number) => <li key={i}>{s}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+
+                        {predictResult.similar_precedents && predictResult.similar_precedents.length > 0 && (
+                          <div>
+                            <strong className="text-zinc-400 block mb-1.5">Relevant Supreme Court / High Court Precedents:</strong>
+                            <div className="space-y-2">
+                              {predictResult.similar_precedents.map((p: any, i: number) => (
+                                <div key={i} className="p-3 bg-zinc-950/40 border border-zinc-900 rounded-lg text-xs">
+                                  <div className="flex justify-between font-bold text-zinc-300 font-mono">
+                                    <span>{p.case_name}</span>
+                                    <span className="text-blue-400">{p.citation}</span>
+                                  </div>
+                                  <p className="text-zinc-400 mt-1">{p.relevance}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+
               {/* Analyzer Results Grid */}
               {!isAnalyzing && (analyzerTimeline.length > 0 || analyzerFacts) && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1985,7 +2785,20 @@ export default function Home() {
                 
                 {/* 1. Risk Scanner panel */}
                 <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4 lg:col-span-2">
-                  <h3 className="text-sm font-bold text-zinc-200">Contract Risk Scanning</h3>
+                  <div className="flex justify-between items-center mb-2">
+                    <h3 className="text-sm font-bold text-zinc-200">Contract Risk Scanning</h3>
+                    {auditRisks.length > 0 && (
+                      <button
+                        onClick={() => {
+                          const content = `CONTRACT RISK SCAN REPORT\n\n${auditRisks.map(r => `CLAUSE: ${r.clause_title} [Risk: ${r.risk_rating}]\nSummary: ${r.summary}\nRemediation: ${r.remediation_advice}`).join("\n\n")}`;
+                          exportToPDF("Contract_Risk_Scan_Report", content);
+                        }}
+                        className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded-lg text-xs flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Export PDF
+                      </button>
+                    )}
+                  </div>
                   {selectedMatter && (
                     <div className="flex gap-4 items-center mb-3">
                       <select 
@@ -2275,19 +3088,29 @@ export default function Home() {
                     <div className="flex justify-between items-center border-b border-zinc-800 pb-3">
                       <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider font-mono">Workspace Editor</h3>
                       {generatedDraft && (
-                        <button 
-                          onClick={() => {
-                            const blob = new Blob([generatedDraft], { type: "text/plain;charset=utf-8" });
-                            const url = URL.createObjectURL(blob);
-                            const link = document.createElement("a");
-                            link.href = url;
-                            link.download = `${selectedTemplate?.id || "draft"}_generated.txt`;
-                            link.click();
-                          }}
-                          className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-zinc-200 transition"
-                        >
-                          <Download className="w-3 h-3" /> Save Draft Text
-                        </button>
+                        <div className="flex gap-3">
+                          <button 
+                            onClick={() => {
+                              const blob = new Blob([generatedDraft], { type: "text/plain;charset=utf-8" });
+                              const url = URL.createObjectURL(blob);
+                              const link = document.createElement("a");
+                              link.href = url;
+                              link.download = `${selectedTemplate?.id || "draft"}_generated.txt`;
+                              link.click();
+                            }}
+                            className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-zinc-200 transition cursor-pointer"
+                          >
+                            <Download className="w-3 h-3" /> Save Text
+                          </button>
+                          <button 
+                            onClick={() => {
+                              exportToPDF(selectedTemplate?.name || "Legal_Draft", generatedDraft);
+                            }}
+                            className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-zinc-200 transition cursor-pointer border-l border-zinc-800 pl-2"
+                          >
+                            <Download className="w-3 h-3 text-emerald-500" /> Export PDF
+                          </button>
+                        </div>
                       )}
                     </div>
                     {generatedDraft ? (
@@ -2593,20 +3416,291 @@ export default function Home() {
             </div>
           )}
 
+          {/* ====== TAB: BILLING & INVOICES ====== */}
+          {activeTab === "billing" && (
+            <div className="space-y-6 animate-fade-in">
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight">{lang === "hi" ? "\u092c\u093f\u0932\u093f\u0902\u0917 \u0914\u0930 \u091a\u093e\u0932\u093e\u0928" : "Billing & Invoices"}</h1>
+                <p className="text-sm text-zinc-400">Track billable hours, generate GST-compliant invoices, and manage payments.</p>
+              </div>
+              {selectedClient && (
+                <div className="flex gap-4 items-center flex-wrap">
+                  <select onChange={(e) => { const id = parseInt(e.target.value); setBillingMatterId(id); fetchTimeEntries(id); }}
+                    className="p-2 text-xs rounded-lg glass-input text-zinc-300">
+                    <option value="">-- Select Matter for Billing --</option>
+                    {matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+                  </select>
+                  <button onClick={fetchInvoices} className="px-3 py-2 text-xs border border-zinc-700 rounded-lg text-zinc-300 hover:bg-zinc-800 transition">Load Invoices</button>
+                </div>
+              )}
+              {!selectedClient && <div className="p-4 border border-zinc-800 rounded-xl text-xs text-zinc-500">Select a client from Matters & Context tab first.</div>}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {currentUser?.role !== "client" && (
+                  <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
+                    <h3 className="text-sm font-bold text-zinc-200">&#9200;&#65039; Time Tracker</h3>
+                    <div className="flex items-center gap-4 p-4 bg-zinc-950/60 border border-zinc-800 rounded-xl">
+                      <span className="text-2xl font-mono text-emerald-400 tabular-nums">{formatTimer(timerSeconds)}</span>
+                      <div className="flex gap-2">
+                        {!billingTimer?.running
+                          ? <button onClick={startTimer} className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white text-xs rounded-lg font-semibold transition">&#9654; Start</button>
+                          : <button onClick={stopTimer} className="px-3 py-1.5 bg-rose-800 hover:bg-rose-700 text-white text-xs rounded-lg font-semibold transition">&#9209; Stop</button>
+                        }
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <input value={newTimeEntry.description} onChange={e => setNewTimeEntry(p => ({...p, description: e.target.value}))}
+                        placeholder="Work description (e.g. Court appearance)" className="w-full p-2.5 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950" />
+                      <div className="grid grid-cols-3 gap-2">
+                        <input value={newTimeEntry.hours} onChange={e => setNewTimeEntry(p => ({...p, hours: e.target.value}))}
+                          type="number" step="0.5" placeholder="Hours" className="p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950" />
+                        <input value={newTimeEntry.rate_per_hour} onChange={e => setNewTimeEntry(p => ({...p, rate_per_hour: e.target.value}))}
+                          type="number" placeholder="&#8377; Rate/hr" className="p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950" />
+                        <input value={newTimeEntry.date} onChange={e => setNewTimeEntry(p => ({...p, date: e.target.value}))}
+                          type="date" className="p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950" />
+                      </div>
+                      <button onClick={handleAddTimeEntry} disabled={!billingMatterId}
+                        className="w-full py-2 bg-zinc-50 hover:bg-zinc-200 text-zinc-950 font-semibold rounded-lg text-xs transition disabled:opacity-50 cursor-pointer">
+                        + Log Time Entry
+                      </button>
+                    </div>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {timeEntries.map((e, i) => (
+                        <div key={i} className="flex justify-between items-center p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs">
+                          <div>
+                            <p className="text-zinc-200 font-medium">{e.description}</p>
+                            <p className="text-zinc-500">{e.date} &middot; {e.hours}h &times; &#8377;{e.rate_per_hour}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-emerald-400 font-mono">&#8377;{e.amount}</span>
+                            <button onClick={() => handleDeleteTimeEntry(e.id)}><Trash2 className="w-3 h-3 text-zinc-600 hover:text-rose-400 cursor-pointer" /></button>
+                          </div>
+                        </div>
+                      ))}
+                      {timeEntries.length === 0 && <p className="text-xs text-zinc-500 italic text-center">No time entries yet.</p>}
+                    </div>
+                    <div className="flex justify-between text-xs text-zinc-400 font-semibold border-t border-zinc-800 pt-2">
+                      <span>Total Billable</span>
+                      <span className="text-zinc-100">&#8377;{timeEntries.reduce((s, e) => s + parseFloat(e.amount || 0), 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
+                
+                <div className={`border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4 ${currentUser?.role === "client" ? "lg:col-span-2" : ""}`}>
+                  {currentUser?.role !== "client" ? (
+                    <>
+                      <h3 className="text-sm font-bold text-zinc-200">&#129395; Invoice Generator (GST 18%)</h3>
+                      <div className="p-4 bg-zinc-950/60 border border-zinc-800 rounded-xl space-y-2 text-xs">
+                        <div className="flex justify-between"><span className="text-zinc-400">Subtotal</span><span>&#8377;{timeEntries.reduce((s, e) => s + parseFloat(e.amount || 0), 0).toFixed(2)}</span></div>
+                        <div className="flex justify-between"><span className="text-zinc-400">GST @ 18%</span><span className="text-amber-400">&#8377;{(timeEntries.reduce((s, e) => s + parseFloat(e.amount || 0), 0) * 0.18).toFixed(2)}</span></div>
+                        <div className="flex justify-between border-t border-zinc-700 pt-2 font-bold"><span>Grand Total</span><span className="text-emerald-400">&#8377;{(timeEntries.reduce((s, e) => s + parseFloat(e.amount || 0), 0) * 1.18).toFixed(2)}</span></div>
+                      </div>
+                      <button onClick={handleGenerateInvoice} disabled={isCreatingInvoice || !billingMatterId}
+                        className="w-full py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition disabled:opacity-50 cursor-pointer animate-pulse-glow">
+                        {isCreatingInvoice ? "Generating..." : "&#128196; Generate Invoice + PDF"}
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex justify-between items-center border-b border-zinc-850 pb-2">
+                      <h3 className="text-sm font-bold text-zinc-200">Your Case Invoices</h3>
+                      <span className="text-[10px] text-zinc-500 font-mono">GST 18% INCLUDED</span>
+                    </div>
+                  )}
+                  
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto pt-1">
+                    <h4 className="text-[10px] text-zinc-500 font-bold uppercase">All Invoices</h4>
+                    {invoices.map((inv, i) => (
+                      <div key={i} className="flex justify-between items-center p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs hover:border-zinc-700 transition">
+                        <div>
+                          <p className="text-zinc-200 font-mono font-semibold">{inv.invoice_number}</p>
+                          <p className="text-zinc-500">{new Date(inv.created_at).toLocaleDateString("en-IN")}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-400 font-semibold">&#8377;{inv.grand_total}</span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${inv.status === "paid" ? "bg-emerald-900/40 text-emerald-400 border border-emerald-800" : "bg-amber-900/40 text-amber-400 border border-amber-800"}`}>{inv.status.toUpperCase()}</span>
+                          <button 
+                            onClick={() => {
+                              exportToPDF(
+                                inv.invoice_number,
+                                `INVOICE\n${inv.invoice_number}\nTotal: ₹${inv.total_amount}\nGST (18%): ₹${inv.gst_amount}\nGrand Total: ₹${inv.grand_total}\nStatus: ${inv.status}\nDate: ${new Date(inv.created_at).toLocaleDateString("en-IN")}`
+                              );
+                            }}
+                            title="Download Invoice PDF"
+                            className="text-zinc-400 hover:text-white p-1 ml-1 transition cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {invoices.length === 0 && <p className="text-xs text-zinc-500 italic text-center py-4">No invoices issued yet.</p>}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ====== TAB: ANALYTICS ====== */}
+          {activeTab === "analytics" && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h1 className="text-2xl font-bold tracking-tight">Practice Analytics</h1>
+                  <p className="text-sm text-zinc-400">Revenue trends, matter status, and upcoming hearings at a glance.</p>
+                </div>
+                <button onClick={fetchAnalytics} className="px-3 py-2 text-xs border border-zinc-700 rounded-lg text-zinc-300 hover:bg-zinc-800 transition flex items-center gap-1.5"><RefreshCw className="w-3 h-3" /> Refresh</button>
+              </div>
+              {analyticsLoading && <div className="text-center text-xs text-zinc-400 animate-pulse py-8">Loading analytics...</div>}
+              {analyticsData && (
+                <>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    {[
+                      { label: "Total Clients", value: analyticsData.total_clients, color: "text-blue-400", icon: "&#128100;" },
+                      { label: "Active Matters", value: analyticsData.open_matters, color: "text-emerald-400", icon: "&#9878;&#65039;" },
+                      { label: "Documents", value: analyticsData.total_documents, color: "text-violet-400", icon: "&#128196;" },
+                      { label: "Total Revenue", value: `&#8377;${analyticsData.total_revenue_inr?.toLocaleString("en-IN")}`, color: "text-amber-400", icon: "&#128176;" },
+                    ].map((stat, i) => (
+                      <div key={i} className="border border-zinc-800 bg-zinc-900/30 p-5 rounded-xl">
+                        <p className="text-2xl mb-1" dangerouslySetInnerHTML={{__html: stat.icon}} />
+                        <p className={`text-xl font-bold tabular-nums ${stat.color}`} dangerouslySetInnerHTML={{__html: String(stat.value)}} />
+                        <p className="text-[11px] text-zinc-500 mt-1">{stat.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="border border-zinc-800 bg-zinc-900/30 p-5 rounded-xl space-y-3">
+                      <h3 className="text-sm font-bold text-zinc-200">Revenue Overview</h3>
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between p-3 bg-emerald-950/30 border border-emerald-900/40 rounded-lg">
+                          <span className="text-zinc-400">Collected Revenue</span>
+                          <span className="text-emerald-400 font-bold">&#8377;{analyticsData.total_revenue_inr?.toLocaleString("en-IN")}</span>
+                        </div>
+                        <div className="flex justify-between p-3 bg-amber-950/30 border border-amber-900/40 rounded-lg">
+                          <span className="text-zinc-400">Pending Invoices</span>
+                          <span className="text-amber-400 font-bold">&#8377;{analyticsData.pending_revenue_inr?.toLocaleString("en-IN")}</span>
+                        </div>
+                      </div>
+                      <h4 className="text-[10px] text-zinc-500 font-bold uppercase mt-2">Recent Invoices</h4>
+                      {analyticsData.recent_invoices?.map((inv: any, i: number) => (
+                        <div key={i} className="flex justify-between items-center py-1.5 border-b border-zinc-800/50 text-xs">
+                          <span className="text-zinc-300 font-mono">{inv.invoice_number}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-zinc-100">&#8377;{inv.grand_total}</span>
+                            <span className={`text-[9px] px-1 rounded ${inv.status === "paid" ? "text-emerald-400" : "text-amber-400"}`}>{inv.status}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border border-zinc-800 bg-zinc-900/30 p-5 rounded-xl space-y-3">
+                      <h3 className="text-sm font-bold text-zinc-200">Hearings (Next 7 Days)</h3>
+                      {analyticsData.upcoming_hearings?.length === 0 && <p className="text-xs text-zinc-500 italic">No hearings in next 7 days.</p>}
+                      {analyticsData.upcoming_hearings?.map((h: any, i: number) => (
+                        <div key={i} className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg flex justify-between items-start text-xs">
+                          <div>
+                            <p className="text-zinc-200 font-semibold">{h.title}</p>
+                            <p className="text-zinc-500">{new Date(h.target_date).toLocaleDateString("en-IN", {weekday: "short", day: "numeric", month: "short"})}</p>
+                          </div>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 uppercase">{h.schedule_type}</span>
+                        </div>
+                      ))}
+                      <div className="pt-3 border-t border-zinc-800">
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          <div className="p-2 bg-zinc-950/60 rounded-lg"><p className="text-emerald-400 font-bold">{analyticsData.open_matters}</p><p className="text-zinc-500">Open</p></div>
+                          <div className="p-2 bg-zinc-950/60 rounded-lg"><p className="text-amber-400 font-bold">{analyticsData.total_matters - analyticsData.open_matters - analyticsData.closed_matters}</p><p className="text-zinc-500">Pending</p></div>
+                          <div className="p-2 bg-zinc-950/60 rounded-lg"><p className="text-zinc-400 font-bold">{analyticsData.closed_matters}</p><p className="text-zinc-500">Closed</p></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+              {!analyticsData && !analyticsLoading && (
+                <div className="text-center py-12">
+                  <button onClick={fetchAnalytics} className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-sm font-semibold transition">Load Analytics Dashboard</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ====== TAB: SETTINGS ====== */}
+          {activeTab === "settings" && (
+            <div className="space-y-6 animate-fade-in">
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+                <p className="text-sm text-zinc-400">Security settings, language preferences, and system configuration.</p>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-zinc-200">Two-Factor Authentication</h3>
+                    <span className={`text-[10px] px-2 py-0.5 rounded border font-bold ${twoFaEnabled ? "text-emerald-400 border-emerald-800 bg-emerald-950/30" : "text-zinc-500 border-zinc-700"}`}>{twoFaEnabled ? "ENABLED" : "DISABLED"}</span>
+                  </div>
+                  <p className="text-xs text-zinc-400">Protect your account with Google Authenticator or any TOTP app.</p>
+                  {!twoFaEnabled && (
+                    <>
+                      <button onClick={handle2FASetup} disabled={twoFaLoading} className="w-full py-2 bg-violet-800 hover:bg-violet-700 text-white font-semibold rounded-lg text-xs transition disabled:opacity-50">
+                        {twoFaLoading ? "Setting up..." : "Set Up 2FA"}
+                      </button>
+                      {twoFaQr && (
+                        <div className="space-y-3">
+                          <p className="text-xs text-zinc-300">Scan this QR code with your authenticator app:</p>
+                          <img src={`data:image/png;base64,${twoFaQr}`} alt="2FA QR Code" className="w-40 h-40 rounded-lg border border-zinc-700 mx-auto" />
+                          <p className="text-[10px] text-zinc-500 text-center font-mono break-all">Manual key: {twoFaSecret}</p>
+                          <input value={twoFaCode} onChange={e => setTwoFaCode(e.target.value)} placeholder="Enter 6-digit code"
+                            className="w-full p-2.5 text-xs rounded-lg glass-input text-zinc-200 font-mono tracking-widest text-center" maxLength={6} />
+                          <button onClick={handle2FAEnable} disabled={twoFaCode.length !== 6} className="w-full py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition disabled:opacity-50">
+                            Verify &amp; Enable 2FA
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {twoFaEnabled && <div className="p-3 bg-emerald-950/30 border border-emerald-900/40 rounded-xl text-xs text-emerald-300">2FA is active and protecting your account.</div>}
+                </div>
+                <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
+                  <h3 className="text-sm font-bold text-zinc-200">Language / &#2349;&#2366;&#2359;&#2366;</h3>
+                  <div className="flex gap-3">
+                    <button onClick={() => { setLang("en"); localStorage.setItem("aegis_lang","en"); }} className={`flex-1 py-3 rounded-xl text-sm font-semibold border transition ${lang === "en" ? "bg-zinc-100 text-zinc-900 border-zinc-300" : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}>English</button>
+                    <button onClick={() => { setLang("hi"); localStorage.setItem("aegis_lang","hi"); }} className={`flex-1 py-3 rounded-xl text-sm font-semibold border transition ${lang === "hi" ? "bg-zinc-100 text-zinc-900 border-zinc-300" : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}>&#2361;&#2367;&#2306;&#2342;&#2368;</button>
+                  </div>
+                </div>
+                <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-3">
+                  <h3 className="text-sm font-bold text-zinc-200">Hearing Alerts</h3>
+                  <p className="text-xs text-zinc-400">Desktop notifications for hearings within 48 hours.</p>
+                  <p className="text-[11px] text-zinc-500">Upcoming (next 48h): {upcomingAlerts.length}</p>
+                  {upcomingAlerts.slice(0, 3).map((a, i) => (
+                    <div key={i} className="flex justify-between items-center text-xs p-2 bg-amber-950/20 border border-amber-900/30 rounded-lg">
+                      <span className="text-amber-300">{a.title}</span>
+                      <span className="text-zinc-500">{new Date(a.target_date).toLocaleDateString("en-IN")}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-3">
+                  <h3 className="text-sm font-bold text-zinc-200">Account Info</h3>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between p-2 bg-zinc-950/60 rounded-lg"><span className="text-zinc-500">Email</span><span className="text-zinc-200">{currentUser?.email}</span></div>
+                    <div className="flex justify-between p-2 bg-zinc-950/60 rounded-lg"><span className="text-zinc-500">Role</span><span className="text-zinc-200 capitalize">{currentUser?.role}</span></div>
+                    <div className="flex justify-between p-2 bg-zinc-950/60 rounded-lg"><span className="text-zinc-500">2FA</span><span className={twoFaEnabled ? "text-emerald-400" : "text-zinc-400"}>{twoFaEnabled ? "Enabled" : "Disabled"}</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
         </main>
+
       </div>
 
       {/* Extracted Text Preview Drawer Modal */}
       {showPreviewModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-filter backdrop-blur-sm flex items-center justify-end z-50 animate-fade-in">
-          <div className="w-full max-w-2xl h-screen glass-panel p-6 flex flex-col justify-between shadow-2xl relative">
+          <div className="w-full max-w-4xl h-screen glass-panel p-6 flex flex-col justify-between shadow-2xl relative">
             <div className="absolute top-0 left-0 w-[1px] h-full bg-gradient-to-b from-transparent via-zinc-800 to-transparent" />
             
             <div className="space-y-4 flex-1 flex flex-col min-h-0">
               <div className="flex justify-between items-center border-b border-zinc-900 pb-3">
                 <div className="truncate">
                   <h2 className="text-sm font-bold text-white font-mono truncate">{previewDoc?.original_name}</h2>
-                  <span className="text-[10px] text-zinc-500 font-mono">EXTRACTED EVIDENCE TEXT</span>
+                  <span className="text-[10px] text-zinc-500 font-mono">EXTRACTED EVIDENCE TEXT & ANNOTATIONS</span>
                 </div>
                 <button 
                   onClick={() => setShowPreviewModal(false)}
@@ -2616,14 +3710,108 @@ export default function Home() {
                 </button>
               </div>
               
-              <div className="flex-1 overflow-y-auto bg-zinc-950/40 p-4 rounded-xl border border-zinc-900 font-mono text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed">
-                {previewLoading ? (
-                  <div className="flex items-center justify-center h-full gap-2 text-zinc-500 italic">
-                    <RefreshCw className="w-4 h-4 animate-spin text-zinc-500" /> Loading text extraction...
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-0">
+                {/* Column 1: Document text viewer */}
+                <div className="flex flex-col min-h-0 h-full">
+                  <span className="text-[10px] text-zinc-500 font-mono mb-2 uppercase">Document Text</span>
+                  <div className="flex-1 overflow-y-auto bg-zinc-950/40 p-4 rounded-xl border border-zinc-900 font-mono text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed select-text">
+                    {previewLoading ? (
+                      <div className="flex items-center justify-center h-full gap-2 text-zinc-500 italic">
+                        <RefreshCw className="w-4 h-4 animate-spin text-zinc-500" /> Loading text extraction...
+                      </div>
+                    ) : (
+                      previewText || "No text content extracted."
+                    )}
                   </div>
-                ) : (
-                  previewText || "No text content extracted."
-                )}
+                </div>
+
+                {/* Column 2: Annotation sidebar */}
+                <div className="flex flex-col min-h-0 h-full border-l border-zinc-900 pl-4 space-y-4">
+                  <span className="text-[10px] text-zinc-500 font-mono uppercase">Notes & Annotations</span>
+                  
+                  {/* Add annotation */}
+                  <div className="space-y-3 p-3 bg-zinc-900/20 border border-zinc-900 rounded-xl text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-zinc-300">Add Sticky Highlight</span>
+                      <button 
+                        onClick={() => {
+                          const sel = window.getSelection()?.toString();
+                          if (sel) {
+                            setNewAnnotationText(sel);
+                            showNotification("Selection grabbed!", "success");
+                          } else {
+                            showNotification("Select text in the preview window first", "warning");
+                          }
+                        }}
+                        className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-[10px] font-semibold"
+                      >
+                        Grab Selected Text
+                      </button>
+                    </div>
+                    
+                    <textarea 
+                      value={newAnnotationText} 
+                      onChange={e => setNewAnnotationText(e.target.value)}
+                      placeholder="Selected text segment..." 
+                      rows={2}
+                      className="w-full p-2 text-xs rounded-lg glass-input text-zinc-200 resize-none font-mono bg-zinc-950"
+                    />
+                    
+                    <input 
+                      value={newAnnotationNote} 
+                      onChange={e => setNewAnnotationNote(e.target.value)}
+                      placeholder="Type sticky note comment here..." 
+                      className="w-full p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950"
+                    />
+
+                    <div className="flex justify-between items-center">
+                      <div className="flex gap-2">
+                        {["yellow", "green", "pink"].map(c => (
+                          <button 
+                            key={c} 
+                            onClick={() => setAnnotationColor(c)}
+                            className={`w-4 h-4 rounded-full border ${annotationColor === c ? "border-white scale-110" : "border-transparent"}`}
+                            style={{ backgroundColor: c === "yellow" ? "#eab308" : c === "green" ? "#22c55e" : "#ec4899" }}
+                          />
+                        ))}
+                      </div>
+                      
+                      <button 
+                        onClick={handleSaveAnnotation}
+                        disabled={!newAnnotationText.trim()}
+                        className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-300 disabled:opacity-50 text-zinc-900 font-bold rounded-lg text-[10px] transition"
+                      >
+                        Save Highlight
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Annotations List */}
+                  <div className="flex-1 overflow-y-auto space-y-2">
+                    <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Saved Highlights</span>
+                    {docAnnotations.map((ann, idx) => (
+                      <div 
+                        key={idx} 
+                        className="p-3 border rounded-xl text-xs space-y-1 bg-zinc-950/20"
+                        style={{ borderColor: ann.color === "yellow" ? "#854d0e" : ann.color === "green" ? "#166534" : "#9d174d" }}
+                      >
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="font-mono text-[10px] font-semibold italic bg-zinc-900 px-1 py-0.5 rounded truncate" style={{ color: ann.color === "yellow" ? "#fef08a" : ann.color === "green" ? "#bbf7d0" : "#fbcfe8" }}>
+                            "{ann.selected_text}"
+                          </span>
+                          <button onClick={() => handleDeleteAnnotation(ann.id)} className="text-zinc-600 hover:text-rose-400 shrink-0">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        {ann.note && <p className="text-zinc-300 font-sans text-xs">{ann.note}</p>}
+                        <p className="text-[9px] text-zinc-600 font-mono">{new Date(ann.created_at).toLocaleTimeString()}</p>
+                      </div>
+                    ))}
+                    {docAnnotations.length === 0 && (
+                      <p className="text-xs text-zinc-500 italic text-center py-4">No highlights on this document yet.</p>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2720,6 +3908,8 @@ export default function Home() {
           </div>
         </div>
       )}
+
     </div>
   );
 }
+

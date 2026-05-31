@@ -148,6 +148,53 @@ class BareActSection(Base):
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False)
 
+# ====== BILLING ======
+class TimeEntry(Base):
+    __tablename__ = "time_entries"
+    id = Column(Integer, primary_key=True, index=True)
+    matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), nullable=False)
+    user_email = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    hours = Column(String, nullable=False)       # stored as string decimal
+    rate_per_hour = Column(String, nullable=False, default="5000")  # INR
+    date = Column(String, nullable=False)        # ISO date string
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class Invoice(Base):
+    __tablename__ = "invoices"
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), nullable=True)
+    invoice_number = Column(String, unique=True, nullable=False)
+    total_amount = Column(String, nullable=False)    # INR string
+    gst_amount = Column(String, nullable=False)      # 18% GST
+    grand_total = Column(String, nullable=False)
+    status = Column(String, default="unpaid")        # unpaid, paid, overdue
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+# ====== ANNOTATIONS ======
+class Annotation(Base):
+    __tablename__ = "annotations"
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    user_email = Column(String, nullable=False)
+    selected_text = Column(Text, nullable=False)
+    note = Column(Text, nullable=True)
+    color = Column(String, default="yellow")   # yellow, green, red, blue
+    page_hint = Column(String, nullable=True)  # rough text position hint
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+# ====== 2FA ======
+class TwoFactorSecret(Base):
+    __tablename__ = "two_factor_secrets"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    totp_secret = Column(String, nullable=False)
+    is_enabled = Column(Boolean, default=False)
+    recovery_codes = Column(Text, nullable=True)  # JSON list of hashed codes
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 def init_db():
     from sqlalchemy import text
     Base.metadata.create_all(bind=engine)

@@ -27,7 +27,8 @@ import jwt
 from pydantic import BaseModel, EmailStr
 
 from aegis_backend.database import (
-    init_db, get_db, User, Client, Matter, Schedule, Document, AuditLog, BackupHistory, BareActSection, AEGIS_DIR, DB_PATH
+    init_db, get_db, User, Client, Matter, Schedule, Document, AuditLog, BackupHistory,
+    BareActSection, TimeEntry, Invoice, Annotation, TwoFactorSecret, AEGIS_DIR, DB_PATH
 )
 from aegis_backend.vector_store import LocalVectorStore
 from aegis_backend.document_processor import DocumentProcessor
@@ -229,6 +230,45 @@ class SimplifyClauseRequest(BaseModel):
     clause_text: str
     model_name: str = "deepseek-r1:8b"
 
+class TimeEntryCreate(BaseModel):
+    matter_id: int
+    description: str
+    hours: str
+    rate_per_hour: str = "5000"
+    date: str
+
+class InvoiceCreate(BaseModel):
+    client_id: int
+    matter_id: Optional[int] = None
+    notes: Optional[str] = None
+
+class InvoiceStatusUpdate(BaseModel):
+    status: str  # unpaid, paid, overdue
+
+class AnnotationCreate(BaseModel):
+    document_id: int
+    selected_text: str
+    note: Optional[str] = None
+    color: str = "yellow"
+    page_hint: Optional[str] = None
+
+class TwoFASetupVerify(BaseModel):
+    totp_code: str
+
+class FIRAnalysisRequest(BaseModel):
+    document_ids: List[int]
+    model_name: str = "deepseek-r1:8b"
+
+class PredictOutcomeRequest(BaseModel):
+    facts: str
+    court: str = "District Court"
+    sections: Optional[str] = None
+    model_name: str = "deepseek-r1:8b"
+
+class VoiceTranscribeRequest(BaseModel):
+    audio_base64: str  # base64 encoded wav/mp3
+    language: str = "en"
+
 # ================= API ROUTERS =================
 
 # 1. AUTHENTICATION
@@ -269,6 +309,8 @@ def get_me(current_user: User = Depends(get_current_user)):
 # 2. CLIENT RECORDS
 @app.get("/api/clients")
 def list_clients(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role == "client":
+        return db.query(Client).filter(Client.email == current_user.email).all()
     return db.query(Client).all()
 
 @app.post("/api/clients")
@@ -295,7 +337,12 @@ def delete_client(id: int, db: Session = Depends(get_db), current_user: User = D
 @app.get("/api/matters")
 def list_matters(client_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     query = db.query(Matter)
-    if client_id:
+    if current_user.role == "client":
+        client = db.query(Client).filter(Client.email == current_user.email).first()
+        if not client:
+            return []
+        query = query.filter(Matter.client_id == client.id)
+    elif client_id:
         query = query.filter(Matter.client_id == client_id)
     return query.all()
 
@@ -387,7 +434,16 @@ def check_legal_conflict(req: ConflictCheckRequest, db: Session = Depends(get_db
 @app.get("/api/schedules")
 def list_schedules(matter_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     query = db.query(Schedule)
-    if matter_id:
+    if current_user.role == "client":
+        client = db.query(Client).filter(Client.email == current_user.email).first()
+        if not client:
+            return []
+        mat_ids = [m.id for m in db.query(Matter).filter(Matter.client_id == client.id).all()]
+        if matter_id and matter_id in mat_ids:
+            query = query.filter(Schedule.matter_id == matter_id)
+        else:
+            query = query.filter(Schedule.matter_id.in_(mat_ids))
+    elif matter_id:
         query = query.filter(Schedule.matter_id == matter_id)
     return query.order_by(Schedule.target_date.asc()).all()
 
@@ -506,7 +562,16 @@ def upload_document(
 @app.get("/api/documents")
 def list_documents(matter_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     query = db.query(Document)
-    if matter_id:
+    if current_user.role == "client":
+        client = db.query(Client).filter(Client.email == current_user.email).first()
+        if not client:
+            return []
+        mat_ids = [m.id for m in db.query(Matter).filter(Matter.client_id == client.id).all()]
+        if matter_id and matter_id in mat_ids:
+            query = query.filter(Document.matter_id == matter_id)
+        else:
+            query = query.filter(Document.matter_id.in_(mat_ids))
+    elif matter_id:
         query = query.filter(Document.matter_id == matter_id)
     return query.all()
 
@@ -1091,6 +1156,434 @@ def emergency_panic_button(db: Session = Depends(get_db), current_user: User = D
 
 
 # 12. SYSTEM STATUS & CONFIGURATION
+@app.get("/api/system/models")
+async def list_ollama_models(current_user: User = Depends(get_current_user)):
+    models = await OllamaService.get_available_models()
+    return {"models": models}
+
+@app.get("/api/system/status")
+async def system_diagnostics(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    models = await OllamaService.get_available_models()
+    ollama_running = len(models) > 0
+
+    vault_dir = os.path.join(AEGIS_DIR, "vault")
+    doc_count = db.query(Document).count()
+    matter_count = db.query(Matter).count()
+    client_count = db.query(Client).count()
+
+    db_size = 0
+    if os.path.exists(DB_PATH):
+        db_size = os.path.getsize(DB_PATH)
+
+    return {
+        "ollama_connected": ollama_running,
+        "models_available": models,
+        "database_size_bytes": db_size,
+        "registered_clients": client_count,
+        "registered_matters": matter_count,
+        "vault_document_count": doc_count
+    }
+
+# ================= BILLING ENDPOINTS =================
+
+@app.post("/api/billing/time-entry")
+def create_time_entry(entry: TimeEntryCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    new_entry = TimeEntry(
+        matter_id=entry.matter_id,
+        user_email=current_user.email,
+        description=entry.description,
+        hours=entry.hours,
+        rate_per_hour=entry.rate_per_hour,
+        date=entry.date
+    )
+    db.add(new_entry)
+    db.commit()
+    db.refresh(new_entry)
+    log_audit_trail(db, current_user.email, "CREATE", "time_entry", str(new_entry.id))
+    return {"id": new_entry.id, "message": "Time entry logged"}
+
+@app.get("/api/billing/time-entries")
+def get_time_entries(matter_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    entries = db.query(TimeEntry).filter(TimeEntry.matter_id == matter_id).order_by(TimeEntry.created_at.desc()).all()
+    return [
+        {"id": e.id, "description": e.description, "hours": e.hours, "rate_per_hour": e.rate_per_hour,
+         "date": e.date, "amount": str(round(float(e.hours) * float(e.rate_per_hour), 2))}
+        for e in entries
+    ]
+
+@app.delete("/api/billing/time-entry/{entry_id}")
+def delete_time_entry(entry_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    entry = db.query(TimeEntry).filter(TimeEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    db.delete(entry)
+    db.commit()
+    return {"message": "Deleted"}
+
+@app.post("/api/billing/invoice")
+def create_invoice(req: InvoiceCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Sum up all time entries for this matter
+    entries = db.query(TimeEntry).filter(TimeEntry.matter_id == req.matter_id).all() if req.matter_id else []
+    total = sum(float(e.hours) * float(e.rate_per_hour) for e in entries)
+    gst = round(total * 0.18, 2)
+    grand = round(total + gst, 2)
+    inv_number = f"INV-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    invoice = Invoice(
+        client_id=req.client_id,
+        matter_id=req.matter_id,
+        invoice_number=inv_number,
+        total_amount=str(round(total, 2)),
+        gst_amount=str(gst),
+        grand_total=str(grand),
+        notes=req.notes
+    )
+    db.add(invoice)
+    db.commit()
+    db.refresh(invoice)
+    log_audit_trail(db, current_user.email, "CREATE", "invoice", invoice.invoice_number)
+    return {
+        "id": invoice.id, "invoice_number": invoice.invoice_number,
+        "total_amount": invoice.total_amount, "gst_amount": invoice.gst_amount,
+        "grand_total": invoice.grand_total, "status": invoice.status,
+        "created_at": invoice.created_at.isoformat()
+    }
+
+@app.get("/api/billing/invoices")
+def list_invoices(client_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    query = db.query(Invoice)
+    if current_user.role == "client":
+        client = db.query(Client).filter(Client.email == current_user.email).first()
+        if not client:
+            return []
+        query = query.filter(Invoice.client_id == client.id)
+    elif client_id:
+        query = query.filter(Invoice.client_id == client_id)
+    invoices = query.order_by(Invoice.created_at.desc()).all()
+    return [
+        {"id": i.id, "invoice_number": i.invoice_number, "client_id": i.client_id,
+         "matter_id": i.matter_id, "total_amount": i.total_amount, "gst_amount": i.gst_amount,
+         "grand_total": i.grand_total, "status": i.status, "notes": i.notes,
+         "created_at": i.created_at.isoformat()}
+        for i in invoices
+    ]
+
+@app.put("/api/billing/invoice/{invoice_id}/status")
+def update_invoice_status(invoice_id: int, req: InvoiceStatusUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    inv.status = req.status
+    db.commit()
+    return {"message": "Status updated", "status": req.status}
+
+
+# ================= ANALYTICS ENDPOINT =================
+
+@app.get("/api/analytics/summary")
+def analytics_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    total_clients = db.query(Client).count()
+    total_matters = db.query(Matter).count()
+    open_matters = db.query(Matter).filter(Matter.status == "open").count()
+    closed_matters = db.query(Matter).filter(Matter.status == "closed").count()
+    total_docs = db.query(Document).count()
+    total_invoices = db.query(Invoice).count()
+    paid_invoices = db.query(Invoice).filter(Invoice.status == "paid").count()
+    unpaid_invoices = db.query(Invoice).filter(Invoice.status == "unpaid").count()
+    
+    # Revenue totals
+    all_paid = db.query(Invoice).filter(Invoice.status == "paid").all()
+    total_revenue = sum(float(i.grand_total) for i in all_paid)
+    pending_revenue_invs = db.query(Invoice).filter(Invoice.status == "unpaid").all()
+    pending_revenue = sum(float(i.grand_total) for i in pending_revenue_invs)
+
+    # Upcoming hearings in next 7 days
+    now = datetime.utcnow().isoformat()
+    week_later = (datetime.utcnow() + timedelta(days=7)).isoformat()
+    upcoming = db.query(Schedule).filter(
+        Schedule.is_completed == False,
+        Schedule.target_date >= now,
+        Schedule.target_date <= week_later
+    ).order_by(Schedule.target_date).limit(10).all()
+
+    # Recent invoices
+    recent_invoices = db.query(Invoice).order_by(Invoice.created_at.desc()).limit(5).all()
+
+    return {
+        "total_clients": total_clients,
+        "total_matters": total_matters,
+        "open_matters": open_matters,
+        "closed_matters": closed_matters,
+        "total_documents": total_docs,
+        "total_invoices": total_invoices,
+        "paid_invoices": paid_invoices,
+        "unpaid_invoices": unpaid_invoices,
+        "total_revenue_inr": round(total_revenue, 2),
+        "pending_revenue_inr": round(pending_revenue, 2),
+        "upcoming_hearings": [
+            {"id": s.id, "title": s.title, "schedule_type": s.schedule_type,
+             "target_date": s.target_date, "matter_id": s.matter_id}
+            for s in upcoming
+        ],
+        "recent_invoices": [
+            {"invoice_number": i.invoice_number, "grand_total": i.grand_total, "status": i.status}
+            for i in recent_invoices
+        ]
+    }
+
+
+# ================= UPCOMING HEARINGS (for notifications) =================
+
+@app.get("/api/system/upcoming-hearings")
+def get_upcoming_hearings(hours: int = 48, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    now = datetime.utcnow().isoformat()
+    cutoff = (datetime.utcnow() + timedelta(hours=hours)).isoformat()
+    schedules = db.query(Schedule).filter(
+        Schedule.is_completed == False,
+        Schedule.target_date >= now,
+        Schedule.target_date <= cutoff
+    ).order_by(Schedule.target_date).all()
+    return [
+        {"id": s.id, "title": s.title, "schedule_type": s.schedule_type, "target_date": s.target_date}
+        for s in schedules
+    ]
+
+
+# ================= 2FA ENDPOINTS =================
+
+@app.post("/api/2fa/setup")
+def setup_2fa(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        import pyotp, qrcode, io, base64
+        existing = db.query(TwoFactorSecret).filter(TwoFactorSecret.user_id == current_user.id).first()
+        if existing and existing.is_enabled:
+            raise HTTPException(status_code=400, detail="2FA already enabled. Disable first.")
+        secret = pyotp.random_base32()
+        totp = pyotp.TOTP(secret)
+        uri = totp.provisioning_uri(name=current_user.email, issuer_name="AegisAI")
+        # Generate QR code
+        qr = qrcode.make(uri)
+        buf = io.BytesIO()
+        qr.save(buf, format="PNG")
+        qr_b64 = base64.b64encode(buf.getvalue()).decode()
+        # Store secret (not yet enabled)
+        if existing:
+            existing.totp_secret = secret
+            existing.is_enabled = False
+        else:
+            db.add(TwoFactorSecret(user_id=current_user.id, totp_secret=secret, is_enabled=False))
+        db.commit()
+        return {"secret": secret, "qr_code_base64": qr_b64, "uri": uri}
+    except ImportError:
+        raise HTTPException(status_code=501, detail="pyotp/qrcode not installed. Run: pip install pyotp qrcode[pil]")
+
+@app.post("/api/2fa/enable")
+def enable_2fa(req: TwoFASetupVerify, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        import pyotp
+        rec = db.query(TwoFactorSecret).filter(TwoFactorSecret.user_id == current_user.id).first()
+        if not rec:
+            raise HTTPException(status_code=404, detail="Run /api/2fa/setup first")
+        totp = pyotp.TOTP(rec.totp_secret)
+        if not totp.verify(req.totp_code):
+            raise HTTPException(status_code=400, detail="Invalid TOTP code")
+        rec.is_enabled = True
+        db.commit()
+        log_audit_trail(db, current_user.email, "ENABLE_2FA", "user", str(current_user.id))
+        return {"message": "2FA enabled successfully"}
+    except ImportError:
+        raise HTTPException(status_code=501, detail="pyotp not installed")
+
+@app.post("/api/2fa/disable")
+def disable_2fa(req: TwoFASetupVerify, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        import pyotp
+        rec = db.query(TwoFactorSecret).filter(TwoFactorSecret.user_id == current_user.id).first()
+        if not rec or not rec.is_enabled:
+            raise HTTPException(status_code=400, detail="2FA not enabled")
+        totp = pyotp.TOTP(rec.totp_secret)
+        if not totp.verify(req.totp_code):
+            raise HTTPException(status_code=400, detail="Invalid TOTP code")
+        rec.is_enabled = False
+        db.commit()
+        return {"message": "2FA disabled"}
+    except ImportError:
+        raise HTTPException(status_code=501, detail="pyotp not installed")
+
+@app.get("/api/2fa/status")
+def get_2fa_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    rec = db.query(TwoFactorSecret).filter(TwoFactorSecret.user_id == current_user.id).first()
+    return {"enabled": rec.is_enabled if rec else False}
+
+
+# ================= ANNOTATION ENDPOINTS =================
+
+@app.post("/api/annotations")
+def create_annotation(req: AnnotationCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    ann = Annotation(
+        document_id=req.document_id,
+        user_email=current_user.email,
+        selected_text=req.selected_text,
+        note=req.note,
+        color=req.color,
+        page_hint=req.page_hint
+    )
+    db.add(ann)
+    db.commit()
+    db.refresh(ann)
+    return {"id": ann.id, "message": "Annotation saved"}
+
+@app.get("/api/annotations/{document_id}")
+def get_annotations(document_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    anns = db.query(Annotation).filter(
+        Annotation.document_id == document_id,
+        Annotation.user_email == current_user.email
+    ).order_by(Annotation.created_at.desc()).all()
+    return [
+        {"id": a.id, "selected_text": a.selected_text, "note": a.note,
+         "color": a.color, "page_hint": a.page_hint, "created_at": a.created_at.isoformat()}
+        for a in anns
+    ]
+
+@app.delete("/api/annotations/{annotation_id}")
+def delete_annotation(annotation_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    ann = db.query(Annotation).filter(Annotation.id == annotation_id, Annotation.user_email == current_user.email).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.delete(ann)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+# ================= FIR / CRIMINAL DOCUMENT ANALYZER =================
+
+@app.post("/api/analyze/fir")
+async def analyze_fir_documents(req: FIRAnalysisRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Analyzes FIR, medical reports, and witness statements for contradictions and defense strategies."""
+    combined_text = ""
+    for doc_id in req.document_ids[:5]:
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if doc and os.path.exists(doc.file_path):
+            dp = DocumentProcessor()
+            text = dp.extract_text(doc.file_path)
+            combined_text += f"\n\n[DOCUMENT: {doc.original_name}]\n{text[:3000]}"
+
+    if not combined_text.strip():
+        raise HTTPException(status_code=400, detail="No text could be extracted from selected documents")
+
+    system_prompt = """You are an expert Indian criminal defense lawyer AI. Analyze the provided documents (FIR, medical reports, witness statements) and return a structured JSON object with the following keys:
+- 'case_overview': brief summary of the alleged crime
+- 'fir_timeline': list of {event, timestamp, source} objects
+- 'contradictions': list of {document_a, document_b, contradiction_detail, severity} where severity is High/Medium/Low
+- 'defense_points': list of {point, legal_basis, strength} objects  
+- 'missing_evidence': list of strings describing evidence gaps
+- 'applicable_sections_bns': list of relevant BNS sections
+Return ONLY valid JSON."""
+
+    try:
+        result = await OllamaService.generate_structured(
+            model_name=req.model_name,
+            system_prompt=system_prompt,
+            user_prompt=f"Analyze these criminal case documents:\n{combined_text[:6000]}",
+            schema_hint="{\"case_overview\":\"\", \"fir_timeline\":[], \"contradictions\":[], \"defense_points\":[], \"missing_evidence\":[], \"applicable_sections_bns\":[]}"
+        )
+        log_audit_trail(db, current_user.email, "FIR_ANALYZE", "documents", str(req.document_ids))
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================= PREDICTIVE OUTCOME ENGINE =================
+
+@app.post("/api/analyze/predict-outcome")
+async def predict_case_outcome(req: PredictOutcomeRequest, current_user: User = Depends(get_current_user)):
+    """AI-powered case outcome predictor based on facts, court, and applicable sections."""
+    system_prompt = """You are an expert Indian judicial analyst with 30+ years of Supreme Court and High Court experience. Based on the case facts, court type, and applicable legal sections provided, return a JSON object with:
+- 'predicted_outcome': one of Likely to Succeed / Uncertain / Likely to Fail
+- 'confidence_percentage': integer 0-100
+- 'reasoning': list of 3-5 key reasoning points as strings
+- 'similar_precedents': list of {case_name, citation, relevance} (well-known Indian cases)
+- 'risk_factors': list of strings describing weaknesses in the case
+- 'strengthening_suggestions': list of action items to improve case outcome
+- 'estimated_timeline_months': integer estimate
+Return ONLY valid JSON."""
+
+    user_prompt = f"""Court: {req.court}\nApplicable Sections: {req.sections or 'Not specified'}\nCase Facts: {req.facts[:4000]}"""
+
+    try:
+        result = await OllamaService.generate_structured(
+            model_name=req.model_name,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            schema_hint="{\"predicted_outcome\":\"\", \"confidence_percentage\":50, \"reasoning\":[], \"similar_precedents\":[], \"risk_factors\":[], \"strengthening_suggestions\":[], \"estimated_timeline_months\":12}"
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================= VOICE TRANSCRIPTION STUB =================
+
+@app.post("/api/analyze/transcribe")
+async def transcribe_audio(req: VoiceTranscribeRequest, current_user: User = Depends(get_current_user)):
+    """Transcribes audio using local Whisper via Ollama (if whisper model available)."""
+    import base64, tempfile, subprocess
+    try:
+        audio_bytes = base64.b64decode(req.audio_base64)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+        # Try Ollama whisper first
+        models = await OllamaService.get_available_models()
+        whisper_available = any("whisper" in m.lower() for m in models)
+        if whisper_available:
+            model_name = next(m for m in models if "whisper" in m.lower())
+            result = await OllamaService.generate_structured(
+                model_name=model_name,
+                system_prompt="Transcribe the audio content accurately. Return JSON: {\"transcript\": \"...\"}",
+                user_prompt="Please transcribe the provided audio.",
+                schema_hint="{\"transcript\": \"\"}"
+            )
+            return result
+        else:
+            # Fallback: try whisper CLI
+            proc = subprocess.run(["whisper", tmp_path, "--output_format", "txt", "--language", req.language],
+                                  capture_output=True, text=True, timeout=120)
+            if proc.returncode == 0:
+                transcript = proc.stdout.strip()
+                return {"transcript": transcript}
+            else:
+                return {"transcript": "", "warning": "Whisper not available. Install 'openai-whisper' or pull whisper model in Ollama."}
+    except Exception as e:
+        return {"transcript": "", "error": str(e)}
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except:
+            pass
+
+
+# ================= WHATSAPP MESSAGE GENERATOR =================
+
+@app.get("/api/whatsapp/reminder/{schedule_id}")
+def generate_whatsapp_reminder(schedule_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Generates a pre-filled WhatsApp message link for a hearing reminder."""
+    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    matter = db.query(Matter).filter(Matter.id == schedule.matter_id).first()
+    client = db.query(Client).filter(Client.id == matter.client_id).first() if matter else None
+    
+    date_str = schedule.target_date[:10] if schedule.target_date else "TBD"
+    time_str = schedule.target_date[11:16] if len(schedule.target_date) > 10 else ""
+    
+    message = f"""Dear {client.name if client else 'Client'},\n\nThis is a reminder from your legal representative.\n\n📅 HEARING NOTICE\nCase: {matter.title if matter else 'Your Matter'}\nCourt: {matter.court if matter else 'Court'} | Case No: {matter.case_number or 'N/A'}\nDate: {date_str} {time_str}\nType: {schedule.schedule_type.upper()}\n\nPlease ensure timely presence. Contact us for any queries.\n\nRegards,\nAegisAI Legal Suite"""
+    
+    import urllib.parse
+    whatsapp_url = f"https://wa.me/?text={urllib.parse.quote(message)}"
+    return {"message": message, "whatsapp_url": whatsapp_url, "phone": client.phone if client else ""}
+
+
+# ================= SYSTEM STATUS & CONFIGURATION =================
 @app.get("/api/system/models")
 async def list_ollama_models(current_user: User = Depends(get_current_user)):
     models = await OllamaService.get_available_models()
