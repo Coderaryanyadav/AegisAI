@@ -3,9 +3,11 @@ import json
 import logging
 from typing import List, Dict, Any, Optional
 
+import os
+
 logger = logging.getLogger("aegis_ai.ollama_service")
 
-OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 class OllamaService:
     """Manages 100% offline interactions with local Ollama runtime."""

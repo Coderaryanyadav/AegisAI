@@ -54,9 +54,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SECRET_KEY = "aegis_super_secret_local_key"
+SECRET_KEY = os.environ.get("AEGIS_SECRET_KEY", "aegis_super_secret_local_key")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 1 day session for local client
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("AEGIS_ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))  # 1 day session for local client
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
 vector_store = LocalVectorStore()
