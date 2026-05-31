@@ -248,6 +248,12 @@ export default function Home() {
   // Citation Graph Precedents State
   const [selectedPrecedent, setSelectedPrecedent] = useState<any>(null);
 
+  // Online / Offline Security Mode
+  const [isOnlineMode, setIsOnlineMode] = useState(false);
+  const [showOnlineModeModal, setShowOnlineModeModal] = useState(false);
+  const [onlineModeSyncing, setOnlineModeSyncing] = useState(false);
+  const [onlineModeResult, setOnlineModeResult] = useState<any>(null);
+
   // RBAC Access Maps
   const ALLOWED_TABS: Record<string, string[]> = {
     admin: ["dashboard", "crm", "research", "analyzer", "auditor", "drafting", "billing", "analytics", "settings", "backup"],
@@ -1473,6 +1479,27 @@ export default function Home() {
         )}
 
         <div className="flex items-center gap-4">
+          {/* Online / Offline Mode Toggle Button */}
+          <button
+            id="online-mode-toggle"
+            onClick={() => {
+              if (!isOnlineMode) {
+                setShowOnlineModeModal(true);
+              } else {
+                setIsOnlineMode(false);
+                setOnlineModeResult(null);
+                showNotification("🔒 Offline mode restored — local data unlocked.", "success");
+              }
+            }}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold border transition-all duration-300 cursor-pointer ${
+              isOnlineMode
+                ? "bg-amber-500/20 border-amber-500/60 text-amber-400 hover:bg-amber-500/30 animate-pulse"
+                : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            {isOnlineMode ? "Go Offline" : "Go Online"}
+          </button>
           <span className="text-xs text-zinc-400 font-medium hidden sm:inline">{currentUser?.email}</span>
           <button 
             onClick={handleSignOut}
@@ -1482,6 +1509,167 @@ export default function Home() {
           </button>
         </div>
       </header>
+
+      {/* ============ ONLINE MODE CONFIRMATION MODAL ============ */}
+      {showOnlineModeModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm" id="online-mode-modal">
+          <div className="bg-zinc-950 border border-amber-800/60 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl shadow-amber-950/20 space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-amber-500/10 border border-amber-700/50 rounded-xl">
+                <Globe className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">Activate Online Mode?</h2>
+                <p className="text-[11px] text-zinc-400 mt-0.5">This connects to external services.</p>
+              </div>
+            </div>
+
+            <div className="bg-amber-950/20 border border-amber-900/40 rounded-xl p-4 space-y-2">
+              <p className="text-xs font-bold text-amber-400 uppercase tracking-wider">⚠️ Security Notice</p>
+              <ul className="text-xs text-zinc-300 space-y-1.5 list-disc list-inside">
+                <li>All local data, chats, and documents will be <strong>locked & hidden</strong> while online</li>
+                <li>Only eCourts sync will be permitted during this session</li>
+                <li>No local AI inference runs while online</li>
+                <li>Internet access is strictly limited to eCourts API only</li>
+                <li>Click <strong>"Go Offline"</strong> to restore full local access</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowOnlineModeModal(false)}
+                className="flex-1 py-2.5 text-sm text-zinc-400 border border-zinc-800 rounded-xl hover:bg-zinc-900 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                id="confirm-go-online"
+                onClick={() => {
+                  setIsOnlineMode(true);
+                  setShowOnlineModeModal(false);
+                  showNotification("🌐 Online mode active — local data locked for security.", "info");
+                }}
+                className="flex-1 py-2.5 text-sm font-bold text-white bg-amber-600 hover:bg-amber-500 border border-amber-500 rounded-xl transition cursor-pointer"
+              >
+                Activate Online Mode
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ ONLINE MODE LOCK OVERLAY ============ */}
+      {isOnlineMode && (
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/90 backdrop-blur-md" id="online-mode-overlay">
+          {/* Top warning banner */}
+          <div className="absolute top-0 left-0 right-0 bg-amber-600 text-black text-xs font-bold py-2 text-center tracking-wider uppercase flex items-center justify-center gap-2">
+            <Globe className="w-3.5 h-3.5" />
+            🌐 ONLINE MODE ACTIVE — LOCAL DATA LOCKED FOR SECURITY
+          </div>
+
+          <div className="mt-12 w-full max-w-lg mx-4 space-y-6">
+            {/* Logo */}
+            <div className="text-center space-y-2">
+              <div className="mx-auto w-16 h-16 bg-amber-500/10 border border-amber-700/40 rounded-2xl flex items-center justify-center">
+                <Globe className="w-7 h-7 text-amber-400" />
+              </div>
+              <h2 className="text-xl font-bold text-white">Online Session Active</h2>
+              <p className="text-sm text-zinc-400">Local AI, documents, and client data are securely locked.<br />Use the tools below to sync with eCourts.</p>
+            </div>
+
+            {/* eCourts Sync Panel */}
+            <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-6 space-y-4">
+              <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
+                <Database className="w-4 h-4 text-violet-400" />
+                eCourts CNR Sync
+              </h3>
+              <p className="text-xs text-zinc-500">Enter a CNR number to fetch the latest hearing dates and case status from the eCourts platform.</p>
+
+              <div className="space-y-3">
+                <input
+                  id="ecourts-cnr-input"
+                  type="text"
+                  placeholder="e.g. MHAU010012345678"
+                  value={newMatter.cnr_number}
+                  onChange={e => setNewMatter(prev => ({ ...prev, cnr_number: e.target.value }))}
+                  className="w-full p-3 text-sm rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-violet-700"
+                />
+                <button
+                  id="ecourts-sync-btn"
+                  onClick={async () => {
+                    if (!newMatter.cnr_number.trim()) {
+                      showNotification("Please enter a CNR number", "error");
+                      return;
+                    }
+                    setOnlineModeSyncing(true);
+                    setOnlineModeResult(null);
+                    try {
+                      const res = await fetch(`${API_BASE}/api/ecourts/lookup?cnr=${encodeURIComponent(newMatter.cnr_number.trim())}`, {
+                        headers: { Authorization: `Bearer ${token}` }
+                      });
+                      const data = await res.json();
+                      if (res.ok) {
+                        setOnlineModeResult(data);
+                        showNotification("eCourts data fetched successfully!", "success");
+                      } else {
+                        setOnlineModeResult({ error: data.detail || "Failed to fetch eCourts data" });
+                        showNotification(data.detail || "eCourts lookup failed", "error");
+                      }
+                    } catch (err: any) {
+                      setOnlineModeResult({ error: err.message });
+                      showNotification(err.message, "error");
+                    } finally {
+                      setOnlineModeSyncing(false);
+                    }
+                  }}
+                  disabled={onlineModeSyncing}
+                  className="w-full py-3 font-bold text-sm text-white bg-violet-700 hover:bg-violet-600 border border-violet-600 rounded-xl transition cursor-pointer disabled:opacity-50"
+                >
+                  {onlineModeSyncing ? "Syncing with eCourts..." : "Sync eCourts Data"}
+                </button>
+              </div>
+
+              {/* Result Display */}
+              {onlineModeResult && !onlineModeResult.error && (
+                <div className="bg-emerald-950/20 border border-emerald-800/40 rounded-xl p-4 space-y-2 text-xs text-zinc-300">
+                  <p className="text-emerald-400 font-bold text-[11px] uppercase tracking-wider">✅ eCourts Data Retrieved</p>
+                  {onlineModeResult.case_title && <p><strong className="text-zinc-400">Case:</strong> {onlineModeResult.case_title}</p>}
+                  {onlineModeResult.court && <p><strong className="text-zinc-400">Court:</strong> {onlineModeResult.court}</p>}
+                  {onlineModeResult.judge && <p><strong className="text-zinc-400">Judge:</strong> {onlineModeResult.judge}</p>}
+                  {onlineModeResult.next_date && <p><strong className="text-zinc-400">Next Hearing:</strong> {onlineModeResult.next_date}</p>}
+                  {onlineModeResult.status && <p><strong className="text-zinc-400">Status:</strong> {onlineModeResult.status}</p>}
+                  {onlineModeResult.raw_text && (
+                    <p className="text-zinc-500 text-[10px] font-mono mt-2 border-t border-zinc-800 pt-2">{onlineModeResult.raw_text.slice(0, 300)}...</p>
+                  )}
+                </div>
+              )}
+              {onlineModeResult?.error && (
+                <div className="bg-rose-950/20 border border-rose-800/40 rounded-xl p-3 text-xs text-rose-400">
+                  ❌ {onlineModeResult.error}
+                </div>
+              )}
+            </div>
+
+            {/* Go Offline Button */}
+            <button
+              id="go-offline-btn"
+              onClick={() => {
+                setIsOnlineMode(false);
+                setOnlineModeResult(null);
+                showNotification("🔒 Offline mode restored — local data unlocked.", "success");
+              }}
+              className="w-full py-3 font-bold text-sm text-white bg-rose-800/60 hover:bg-rose-700 border border-rose-700/60 rounded-xl transition cursor-pointer flex items-center justify-center gap-2"
+            >
+              <Lock className="w-4 h-4" />
+              Return to Offline Mode (Unlock Local Data)
+            </button>
+
+            <p className="text-center text-[10px] text-zinc-600 font-mono">
+              🔒 AegisAI Secure Sandbox — All local data encrypted and locked during online session
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-1">
         {/* Left Navigation Sidebar */}

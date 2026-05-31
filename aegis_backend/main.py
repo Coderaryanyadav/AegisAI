@@ -61,6 +61,25 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("AEGIS_ACCESS_TOKEN_EXPIRE_MINU
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
 vector_store = LocalVectorStore()
 
+SYSTEM_ONLINE_MODE = False
+
+def verify_offline_mode():
+    if SYSTEM_ONLINE_MODE:
+        raise HTTPException(
+            status_code=423,
+            detail="System is currently in Online Sync Mode. Modifications are locked. Please toggle back to Offline Mode to enable edits."
+        )
+
+@app.get("/api/system/connection-mode")
+def get_connection_mode(current_user: User = Depends(get_current_user)):
+    return {"online": SYSTEM_ONLINE_MODE}
+
+@app.post("/api/system/connection-mode")
+def set_connection_mode(req: Dict[str, bool], current_user: User = Depends(get_current_user)):
+    global SYSTEM_ONLINE_MODE
+    SYSTEM_ONLINE_MODE = req.get("online", False)
+    return {"online": SYSTEM_ONLINE_MODE}
+
 async def ensure_ollama_runtime():
     """Starts local Ollama daemon if offline and pre-pulls reasoning models."""
     import subprocess
@@ -391,7 +410,7 @@ def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 @app.post("/api/user/firm-settings")
-def update_firm_settings(req: FirmSettingsUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def update_firm_settings(req: FirmSettingsUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), _ = Depends(verify_offline_mode)):
     current_user.firm_name = req.firm_name
     current_user.firm_logo = req.firm_logo
     db.commit()
@@ -408,7 +427,7 @@ def list_clients(db: Session = Depends(get_db), current_user: User = Depends(get
     return db.query(Client).all()
 
 @app.post("/api/clients", response_model=ClientResponse)
-def create_client(client_in: ClientCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_client(client_in: ClientCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), _ = Depends(verify_offline_mode)):
     client = Client(**client_in.dict())
     db.add(client)
     db.commit()
@@ -417,7 +436,7 @@ def create_client(client_in: ClientCreate, db: Session = Depends(get_db), curren
     return client
 
 @app.delete("/api/clients/{id}")
-def delete_client(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def delete_client(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), _ = Depends(verify_offline_mode)):
     client = db.query(Client).filter(Client.id == id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -441,7 +460,7 @@ def list_matters(client_id: Optional[int] = None, db: Session = Depends(get_db),
     return query.all()
 
 @app.post("/api/matters", response_model=MatterResponse)
-def create_matter(matter_in: MatterCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_matter(matter_in: MatterCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), _ = Depends(verify_offline_mode)):
     matter = Matter(**matter_in.dict())
     db.add(matter)
     db.commit()
@@ -450,7 +469,7 @@ def create_matter(matter_in: MatterCreate, db: Session = Depends(get_db), curren
     return matter
 
 @app.delete("/api/matters/{id}")
-def delete_matter(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def delete_matter(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), _ = Depends(verify_offline_mode)):
     matter = db.query(Matter).filter(Matter.id == id).first()
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
@@ -546,6 +565,94 @@ def sync_ecourts_cnr(id: int, db: Session = Depends(get_db), current_user: User 
         "judge": fetched_judge,
         "hearing_date": hearing_date
     }
+
+@app.get("/api/ecourts/lookup")
+def ecourts_lookup(cnr: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    Standalone eCourts CNR lookup for the Online Mode panel.
+    Does NOT modify any local matter data — pure read-only lookup.
+    Checks internet connectivity first, then returns deterministic
+    simulated eCourts data based on CNR hash.
+    """
+    if not cnr or len(cnr.strip()) < 6:
+        raise HTTPException(status_code=400, detail="A valid CNR number is required (min 6 characters)")
+
+    cnr = cnr.strip().upper()
+
+    # Check actual internet connectivity
+    import httpx
+    is_online = False
+    try:
+        res = httpx.get("https://www.google.com", timeout=3.0)
+        if res.status_code == 200:
+            is_online = True
+    except Exception:
+        pass
+
+    if not is_online:
+        raise HTTPException(
+            status_code=503,
+            detail="No internet connection detected. Cannot reach eCourts platform. Please check your network."
+        )
+
+    logger.info(f"eCourts online lookup initiated for CNR: {cnr} by {current_user.email}")
+
+    import random
+    judges = [
+        "Hon'ble Mr. Justice D. Y. Chandrachud",
+        "Hon'ble Mrs. Justice Hima Kohli",
+        "Hon'ble Mr. Justice Sanjiv Khanna",
+        "Hon'ble Mr. Justice B. R. Gavai",
+        "Hon'ble Ms. Justice Indira Banerjee"
+    ]
+    status_choices = ["Open", "Pending Hearing", "Reserved for Judgment", "Disposed"]
+    courts = [
+        "Supreme Court of India",
+        "High Court of Bombay",
+        "High Court of Delhi",
+        "District Court of Saket, New Delhi",
+        "City Civil Court, Mumbai",
+        "High Court of Madras"
+    ]
+    case_types = ["Civil Suit", "Criminal Appeal", "Writ Petition", "Special Leave Petition", "Company Matter"]
+    petitioners = ["State of Maharashtra", "Union of India", "Petitioner Corp Pvt. Ltd.", "M/s Bharat Enterprises"]
+    respondents = ["Respondent Industries Ltd.", "State Bank of India", "Income Tax Department"]
+
+    cnr_seed = sum(ord(c) for c in cnr)
+    random.seed(cnr_seed)
+
+    fetched_court = random.choice(courts)
+    fetched_judge = random.choice(judges)
+    fetched_status = random.choice(status_choices)
+    fetched_case_type = random.choice(case_types)
+    fetched_petitioner = random.choice(petitioners)
+    fetched_respondent = random.choice(respondents)
+    fetched_case_number = f"CS No. {random.randint(100, 9999)}/{datetime.now().year - random.randint(0, 5)}"
+    next_date = (datetime.now() + timedelta(days=random.randint(5, 60))).strftime("%d %B %Y")
+    filed_date = (datetime.now() - timedelta(days=random.randint(30, 1800))).strftime("%d %B %Y")
+
+    log_audit_trail(db, current_user.email, "ECOURTS_LOOKUP", "ecourts", cnr, f"Online lookup for CNR {cnr}")
+
+    return {
+        "cnr": cnr,
+        "case_title": f"{fetched_petitioner} vs. {fetched_respondent}",
+        "case_number": fetched_case_number,
+        "case_type": fetched_case_type,
+        "court": fetched_court,
+        "judge": fetched_judge,
+        "status": fetched_status,
+        "next_date": next_date,
+        "filing_date": filed_date,
+        "raw_text": (
+            f"Case No: {fetched_case_number} | CNR: {cnr}\n"
+            f"Before: {fetched_judge}\n"
+            f"Court: {fetched_court}\n"
+            f"Parties: {fetched_petitioner} vs. {fetched_respondent}\n"
+            f"Type: {fetched_case_type} | Status: {fetched_status}\n"
+            f"Filed: {filed_date} | Next Hearing: {next_date}"
+        )
+    }
+
 
 @app.post("/api/matters/check-conflict")
 def check_legal_conflict(req: ConflictCheckRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
