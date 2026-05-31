@@ -194,3 +194,68 @@ class LegalRAGEngine:
             system_prompt=LEGAL_ASSISTANT_SYSTEM_PROMPT,
             model_override=model_name
         )
+
+    def compare_contracts(self, doc_id_a: int, doc_id_b: int, model_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Runs a contract-to-contract clause compliance comparison locally using the Ollama model.
+        """
+        # Retrieve chunks for Contract A
+        chunks_a = self.vector_store.query_similarity(
+            query="parties effective date termination indemnification liability governing law dispute resolution",
+            limit=50,
+            document_ids=[doc_id_a]
+        )
+        sorted_a = sorted(chunks_a, key=lambda x: x["metadata"].get("chunk_index", 0))
+        text_a = "\n".join([chunk["content"] for chunk in sorted_a])
+
+        # Retrieve chunks for Contract B
+        chunks_b = self.vector_store.query_similarity(
+            query="parties effective date termination indemnification liability governing law dispute resolution",
+            limit=50,
+            document_ids=[doc_id_b]
+        )
+        sorted_b = sorted(chunks_b, key=lambda x: x["metadata"].get("chunk_index", 0))
+        text_b = "\n".join([chunk["content"] for chunk in sorted_b])
+
+        prompt = (
+            "You are a senior legal counsel specializing in contract compliance comparison. "
+            "Compare the following two legal documents (Contract A and Contract B) and provide a structured comparative analysis.\n"
+            "Identify and detail:\n"
+            "1. **Core Similarities**: The terms, definitions, and clauses that are functionally identical.\n"
+            "2. **Critical Differences**: Contrast specific clauses (such as changes in governing law, liability caps, payment terms, or indemnification scope).\n"
+            "3. **Added or Omitted Terms**: Highlight clauses present in one document but completely missing in the other.\n"
+            "4. **Risk Assessment for Contract B**: Evaluate if Contract B introduces additional liability, risks, or unfavorable terms compared to Contract A.\n\n"
+            "CONTRACT A (Reference Contract):\n"
+            f"{text_a}\n\n"
+            "CONTRACT B (Proposed/Modified Contract):\n"
+            f"{text_b}\n\n"
+            "Structure your output in clear markdown sections with bold headers."
+        )
+
+        response_str = self.ollama.generate(
+            prompt=prompt,
+            system_prompt="You are an expert contract risk auditor comparing two agreements.",
+            model_override=model_name
+        )
+        return {"comparison": response_str}
+
+    def simplify_clause(self, clause_text: str, model_name: Optional[str] = None) -> str:
+        """
+        Translates a complex legalese/contract clause into clear, plain English.
+        """
+        prompt = (
+            "Translate the following legalese/contract clause into extremely simple, plain English.\n"
+            "Provide the breakdown in the following sections:\n"
+            "1. **Summary**: A brief one-sentence overview of what this clause means in practice.\n"
+            "2. **Your Rights**: What this clause allows you or the beneficiary to do.\n"
+            "3. **Your Obligations**: What this clause requires you to do, pay, or refrain from doing.\n"
+            "4. **Traps & Red Flags**: Critical risks, hidden costs, or unfavorable legal language to be aware of.\n\n"
+            "CLAUSE TEXT:\n"
+            f"{clause_text}"
+        )
+
+        return self.ollama.generate(
+            prompt=prompt,
+            system_prompt="You are a legal translator who translates complex legalese into clear, simple language.",
+            model_override=model_name
+        )

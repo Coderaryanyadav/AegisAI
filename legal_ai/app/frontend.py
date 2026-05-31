@@ -31,114 +31,9 @@ def load_css():
     else:
         css_content = ""
         
-    # Append custom SaaS-level layout rules, buttons, headers, and hide default streamlit footer
     st.markdown(f"""
     <style>
     {css_content}
-    
-    /* Hide Streamlit default branding */
-    #MainMenu {{visibility: hidden;}}
-    footer {{visibility: hidden;}}
-    header {{visibility: hidden;}}
-    
-    /* Document list list item */
-    .doc-row {{
-        background: #121212;
-        border: 1px solid #222222;
-        border-radius: 4px;
-        padding: 16px 20px;
-        margin-bottom: 10px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        transition: all 0.2s ease;
-    }}
-    .doc-row:hover {{
-        background: #181818;
-        border-color: #444444;
-    }}
-    .doc-info {{
-        display: flex;
-        align-items: center;
-        gap: 15px;
-    }}
-    .doc-icon {{
-        font-size: 1.4rem;
-        background: #1a1a1a;
-        color: #ffffff;
-        width: 42px;
-        height: 42px;
-        border-radius: 2px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: 1px solid #333333;
-    }}
-    .doc-title {{
-        font-weight: 500;
-        color: #ffffff;
-        font-size: 0.95rem;
-    }}
-    .doc-meta {{
-        font-size: 0.8rem;
-        color: #888888;
-        margin-top: 2px;
-    }}
-    
-    /* Metric Cards */
-    .metric-card {{
-        background: #121212;
-        border: 1px solid #222222;
-        padding: 20px;
-        border-radius: 4px;
-        text-align: left;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-    }}
-    .metric-value {{
-        font-size: 2.2rem;
-        font-weight: 500;
-        color: #ffffff;
-        font-family: 'Playfair Display', serif;
-        margin-top: 5px;
-    }}
-    .metric-label {{
-        font-size: 0.85rem;
-        color: #a3a3a3;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }}
-    
-    /* Pill Status badges */
-    .pill-status {{
-        padding: 4px 10px;
-        border-radius: 2px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }}
-    .pill-processed {{
-        background: transparent;
-        color: #ffffff;
-        border: 1px solid #ffffff;
-    }}
-    .pill-processing {{
-        background: transparent;
-        color: #888888;
-        border: 1px solid #444444;
-    }}
-    .pill-failed {{
-        background: transparent;
-        color: #f87171;
-        border: 1px solid #ef4444;
-    }}
-    
-    /* Accent text */
-    .accent-gradient {{
-        color: #ffffff;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-    }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -501,44 +396,43 @@ if not st.session_state.token:
     
     col1, col2, col3 = st.columns([1, 1.4, 1])
     with col2:
-        st.markdown('<div class="legal-card" style="padding: 30px;">', unsafe_allow_html=True)
-        st.markdown("<h4 style='margin-top: 0; color: #f8fafc; font-family:\'Playfair Display\', serif;'>🔒 Secure Console Sign-in</h4>", unsafe_allow_html=True)
-        
-        # Display platform security highlights
-        st.markdown("""
-        <div style="font-size: 0.8rem; color: #888888; border-bottom: 1px solid #222; padding-bottom: 12px; margin-bottom: 20px; line-height: 1.4;">
-            🛡️ <strong>Airtight Architecture</strong>: 100% Local Reasoning (no internet required)<br/>
-            🔒 <strong>AES-256 Storage</strong>: Case documents encrypted dynamically at rest<br/>
-            📋 <strong>Immutable Trail</strong>: Immutable relational logging tracking system queries
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if "login_email_val" not in st.session_state:
-            st.session_state.login_email_val = ""
-        if "login_password_val" not in st.session_state:
-            st.session_state.login_password_val = ""
+        with st.container(border=True):
+            st.markdown("<h4 style='margin-top: 0; color: #f8fafc; font-family:\'Playfair Display\', serif;'>🔒 Secure Console Sign-in</h4>", unsafe_allow_html=True)
             
-        login_email = st.text_input("User Email", value=st.session_state.login_email_val, key="login_email_widget", placeholder="attorney@firm.local")
-        login_password = st.text_input("Security Key / Password", value=st.session_state.login_password_val, type="password", key="login_password_widget")
-        
-        st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
-        col_submit, col_demo = st.columns([1.2, 1])
-        with col_submit:
-            if st.button("Authenticate Session", type="primary", use_container_width=True):
-                if login_email and login_password:
-                    st.session_state.login_email_val = login_email
-                    st.session_state.login_password_val = login_password
-                    login_user(login_email, login_password)
-                else:
-                    st.warning("Credentials are required.")
-        with col_demo:
-            if st.button("Autofill Demo", type="secondary", use_container_width=True):
-                st.session_state.login_email_val = "admin@legalai.local"
-                st.session_state.login_password_val = "adminpassword123"
-                st.session_state.login_email_widget = "admin@legalai.local"
-                st.session_state.login_password_widget = "adminpassword123"
-                st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+            # Display platform security highlights
+            st.markdown("""
+            <div style="font-size: 0.8rem; color: #888888; border-bottom: 1px solid #222; padding-bottom: 12px; margin-bottom: 20px; line-height: 1.4;">
+                🛡️ <strong>Airtight Architecture</strong>: 100% Local Reasoning (no internet required)<br/>
+                🔒 <strong>AES-256 Storage</strong>: Case documents encrypted dynamically at rest<br/>
+                📋 <strong>Immutable Trail</strong>: Immutable relational logging tracking system queries
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if "login_email_val" not in st.session_state:
+                st.session_state.login_email_val = ""
+            if "login_password_val" not in st.session_state:
+                st.session_state.login_password_val = ""
+                
+            login_email = st.text_input("User Email", value=st.session_state.login_email_val, key="login_email_widget", placeholder="attorney@firm.local")
+            login_password = st.text_input("Security Key / Password", value=st.session_state.login_password_val, type="password", key="login_password_widget")
+            
+            st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+            col_submit, col_demo = st.columns([1.2, 1])
+            with col_submit:
+                if st.button("Authenticate Session", type="primary", use_container_width=True):
+                    if login_email and login_password:
+                        st.session_state.login_email_val = login_email
+                        st.session_state.login_password_val = login_password
+                        login_user(login_email, login_password)
+                    else:
+                        st.warning("Credentials are required.")
+            with col_demo:
+                if st.button("Autofill Demo", type="secondary", use_container_width=True):
+                    st.session_state.login_email_val = "admin@legalai.local"
+                    st.session_state.login_password_val = "adminpassword123"
+                    st.session_state.login_email_widget = "admin@legalai.local"
+                    st.session_state.login_password_widget = "adminpassword123"
+                    st.rerun()
     st.stop()
 
 # ----------------- LOGGED IN RENDERER -----------------
@@ -596,7 +490,7 @@ with st.sidebar:
     st.markdown("<p style='color: #475569; font-size:0.75rem; font-weight:600; text-transform:uppercase; margin-bottom: 8px; margin-top:15px;'>Workspace Views</p>", unsafe_allow_html=True)
     
     # Navigation list depending on role
-    nav_options = ["📁 Dashboard", "💬 Chat & Q&A", "🔍 Contract Auditor", "✍️ Document Drafting", "📅 Case Timeline"]
+    nav_options = ["📁 Dashboard", "💬 Chat & Q&A", "🔍 Contract Auditor", "✍️ Document Drafting", "📅 Case Timeline", "⚖️ Legalese Translator", "📋 Document Templates"]
     if st.session_state.role in ["admin", "auditor"]:
         nav_options.append("📋 Security Audit Trail")
     if st.session_state.role == "admin":
@@ -666,23 +560,22 @@ if choice == "📁 Dashboard":
     col_left, col_right = st.columns([1.2, 2])
     
     with col_left:
-        st.markdown('<div class="legal-card">', unsafe_allow_html=True)
-        st.markdown("<h4 style='margin-top:0; color:#f8fafc;'>Secure Ingest Pipeline</h4>", unsafe_allow_html=True)
-        st.markdown("<p style='color:#64748b; font-size:0.85rem;'>Upload documents to be parsed and indexed locally. PDFs are split page-by-page, and text is dynamically encrypted at rest.</p>", unsafe_allow_html=True)
-        
-        uploaded_file = st.file_uploader("Select PDF or Plain TXT Document:", type=["pdf", "txt"], label_visibility="collapsed")
-        
-        with st.expander("⚙️ Advanced Ingestion Settings", expanded=False):
-            chunk_size = st.slider("Chunk Size (characters)", min_value=200, max_value=2000, value=500, step=50)
-            chunk_overlap = st.slider("Chunk Overlap (characters)", min_value=20, max_value=500, value=50, step=10)
-        
-        st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
-        if st.button("Trigger Vault Ingestion", type="primary", use_container_width=True, disabled=(uploaded_file is None)):
-            if uploaded_file is not None:
-                if upload_document(uploaded_file, chunk_size=chunk_size, chunk_overlap=chunk_overlap):
-                    st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown("<h4 style='margin-top:0; color:#f8fafc;'>Secure Ingest Pipeline</h4>", unsafe_allow_html=True)
+            st.markdown("<p style='color:#64748b; font-size:0.85rem;'>Upload documents to be parsed and indexed locally. PDFs are split page-by-page, and text is dynamically encrypted at rest.</p>", unsafe_allow_html=True)
+            
+            uploaded_file = st.file_uploader("Select PDF or Plain TXT Document:", type=["pdf", "txt"], label_visibility="collapsed")
+            
+            with st.expander("⚙️ Advanced Ingestion Settings", expanded=False):
+                chunk_size = st.slider("Chunk Size (characters)", min_value=200, max_value=2000, value=500, step=50)
+                chunk_overlap = st.slider("Chunk Overlap (characters)", min_value=20, max_value=500, value=50, step=10)
+            
+            st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
+            if st.button("Trigger Vault Ingestion", type="primary", use_container_width=True, disabled=(uploaded_file is None)):
+                if uploaded_file is not None:
+                    if upload_document(uploaded_file, chunk_size=chunk_size, chunk_overlap=chunk_overlap):
+                        st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
         
     with col_right:
         col_title, col_sync = st.columns([3, 1])
@@ -818,124 +711,169 @@ elif choice == "🔍 Contract Auditor":
     if not processed_docs:
         st.warning("Please upload contract files (PDF/TXT) to start auditing.")
     else:
-        # Select contract to audit in card layout
-        st.markdown('<div class="legal-card">', unsafe_allow_html=True)
-        doc_options = {doc["id"]: doc["original_name"] for doc in processed_docs}
-        selected_doc_id = st.selectbox("Select contract document for risk scan:", options=list(doc_options.keys()), format_func=lambda x: doc_options[x])
+        auditor_tab1, auditor_tab2 = st.tabs(["📌 Clause Risk Scan", "🔄 Compare Contracts"])
         
-        st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
-        trigger_audit = st.button("Perform Automated Clause Scan", type="primary")
-        st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        if trigger_audit:
-            with st.spinner("Extracting governing clauses and analyzing risk profiles..."):
-                audit_report = audit_contract(selected_doc_id, model_name=st.session_state.selected_model)
-                if audit_report:
-                    if "error" in audit_report:
-                        st.error(audit_report["error"])
-                        st.text_area("Raw AI Output Log", audit_report.get("raw_output", ""))
-                    else:
-                        # Success panel
-                        rating = audit_report.get("overall_compliance_rating", "Unknown")
-                        rating_color = "#ef4444" if "High" in rating else "#f59e0b" if "Moderate" in rating else "#10b981"
-                        
-                        st.markdown(f"""
-                        <div class="legal-card" style="border-left: 5px solid {rating_color};">
-                            <h3 style="margin-top:0; color:#f8fafc;">Risk Analysis Report</h3>
-                            <p style="color:#94a3b8; font-size:0.9rem; margin-bottom: 5px;">Overall Compliance Standing:</p>
-                            <div style="font-size: 1.5rem; font-weight:700; color:{rating_color};">{rating}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Compute compliance checklist
-                        standard_clauses = [
-                            {"name": "Governing Law", "key_terms": ["governing", "jurisdiction", "applicable law"]},
-                            {"name": "Termination", "key_terms": ["termination", "terminate", "expiration"]},
-                            {"name": "Indemnity", "key_terms": ["indemnity", "indemnification", "hold harmless"]},
-                            {"name": "Confidentiality", "key_terms": ["confidential", "confidentiality", "non-disclosure"]},
-                            {"name": "Force Majeure", "key_terms": ["force majeure", "act of god", "unforeseen event"]},
-                            {"name": "Severability", "key_terms": ["severability", "severable", "invalidity"]}
-                        ]
-                        
-                        found_categories = []
-                        clauses_list = audit_report.get("clauses_extracted", [])
-                        for cl in clauses_list:
-                            cat = str(cl.get("clause_type", "")).lower()
-                            summary = str(cl.get("summary", "")).lower()
-                            found_categories.append(cat)
-                            found_categories.append(summary)
+        with auditor_tab1:
+            with st.container(border=True):
+                doc_options = {doc["id"]: doc["original_name"] for doc in processed_docs}
+                selected_doc_id = st.selectbox("Select contract document for risk scan:", options=list(doc_options.keys()), format_func=lambda x: doc_options[x], key="auditor_scan_select")
+                
+                st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
+                trigger_audit = st.button("Perform Automated Clause Scan", type="primary", key="auditor_scan_btn")
+                st.markdown("</div>", unsafe_allow_html=True)
+            
+            if trigger_audit:
+                with st.spinner("Extracting governing clauses and analyzing risk profiles..."):
+                    audit_report = audit_contract(selected_doc_id, model_name=st.session_state.selected_model)
+                    if audit_report:
+                        if "error" in audit_report:
+                            st.error(audit_report["error"])
+                            st.text_area("Raw AI Output Log", audit_report.get("raw_output", ""))
+                        else:
+                            # Success panel
+                            rating = audit_report.get("overall_compliance_rating", "Unknown")
+                            rating_color = "#ef4444" if "High" in rating else "#f59e0b" if "Moderate" in rating else "#10b981"
                             
-                        missing_list = audit_report.get("missing_clauses", [])
-                        missing_categories = [str(m.get("clause_type", "")).lower() for m in missing_list]
-                        
-                        # Generate HTML Checklist
-                        checklist_html = '<div class="legal-card" style="padding: 20px;">'
-                        checklist_html += '<h4 style="margin-top:0; margin-bottom:15px; color:#ffffff; font-family:\'Playfair Display\', serif;">⚖️ Legal Due Diligence Checklist</h4>'
-                        checklist_html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">'
-                        
-                        for sc in standard_clauses:
-                            sc_name = sc["name"]
-                            is_missing = any(sc_name.lower() in mc for mc in missing_categories)
-                            is_found = any(sc_name.lower() in fc for fc in found_categories) or any(any(kt in fc for kt in sc["key_terms"]) for fc in found_categories)
+                            st.markdown(f"""
+                            <div class="legal-card" style="border-left: 5px solid {rating_color};">
+                                <h3 style="margin-top:0; color:#f8fafc;">Risk Analysis Report</h3>
+                                <p style="color:#94a3b8; font-size:0.9rem; margin-bottom: 5px;">Overall Compliance Standing:</p>
+                                <div style="font-size: 1.5rem; font-weight:700; color:{rating_color};">{rating}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
                             
-                            if is_found and not is_missing:
-                                checklist_html += f'<div style="font-size:0.9rem; display:flex; align-items:center; gap:8px; color:#ffffff;">🟢 <strong>{sc_name}</strong>: Identified</div>'
-                            else:
-                                checklist_html += f'<div style="font-size:0.9rem; display:flex; align-items:center; gap:8px; color:#888888;">🔴 <span style="text-decoration: line-through;">{sc_name}</span>: Omitted</div>'
+                            # Compute compliance checklist
+                            standard_clauses = [
+                                {"name": "Governing Law", "key_terms": ["governing", "jurisdiction", "applicable law"]},
+                                {"name": "Termination", "key_terms": ["termination", "terminate", "expiration"]},
+                                {"name": "Indemnity", "key_terms": ["indemnity", "indemnification", "hold harmless"]},
+                                {"name": "Confidentiality", "key_terms": ["confidential", "confidentiality", "non-disclosure"]},
+                                {"name": "Force Majeure", "key_terms": ["force majeure", "act of god", "unforeseen event"]},
+                                {"name": "Severability", "key_terms": ["severability", "severable", "invalidity"]}
+                            ]
+                            
+                            found_categories = []
+                            clauses_list = audit_report.get("clauses_extracted", [])
+                            for cl in clauses_list:
+                                cat = str(cl.get("clause_type", "")).lower()
+                                summary = str(cl.get("summary", "")).lower()
+                                found_categories.append(cat)
+                                found_categories.append(summary)
                                 
-                        checklist_html += '</div></div>'
-                        st.markdown(checklist_html, unsafe_allow_html=True)
-                        
-                        # Tabs
-                        tab_clauses, tab_risks, tab_gaps = st.tabs(["📌 Clauses Extracted", "⚠️ Risk Log", "❌ Compliance Gaps"])
-                        
-                        with tab_clauses:
-                            st.write(f"**Contract Structure:** {audit_report.get('contract_type', 'N/A')}")
-                            st.write(f"**Effective Date:** {audit_report.get('effective_date', 'N/A')}")
-                            st.write(f"**Identified Signatories:** {', '.join(audit_report.get('parties', []))}")
+                            missing_list = audit_report.get("missing_clauses", [])
+                            missing_categories = [str(m.get("clause_type", "")).lower() for m in missing_list]
                             
-                            clauses = audit_report.get("clauses_extracted", [])
-                            if clauses:
-                                pd_clauses = pd.DataFrame(clauses)
-                                pd_clauses.columns = ["Clause Category", "Summary of Terms", "Original Text Excerpt"]
-                                st.dataframe(pd_clauses, use_container_width=True)
-                            else:
-                                st.info("No primary clauses extracted.")
+                            # Generate HTML Checklist
+                            checklist_html = '<div class="legal-card" style="padding: 20px;">'
+                            checklist_html += '<h4 style="margin-top:0; margin-bottom:15px; color:#ffffff; font-family:\'Playfair Display\', serif;">⚖️ Legal Due Diligence Checklist</h4>'
+                            checklist_html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">'
+                            
+                            for sc in standard_clauses:
+                                sc_name = sc["name"]
+                                is_missing = any(sc_name.lower() in mc for mc in missing_categories)
+                                is_found = any(sc_name.lower() in fc for fc in found_categories) or any(any(kt in fc for kt in sc["key_terms"]) for fc in found_categories)
                                 
-                        with tab_risks:
-                            risks = audit_report.get("risks_identified", [])
-                            if not risks:
-                                st.success("No critical liabilities or legal risks identified in scanned text.")
-                            else:
-                                for r in risks:
-                                    severity = r.get("severity", "Low")
-                                    color = "#ef4444" if severity == "High" else "#fbbf24" if severity == "Medium" else "#34d399"
-                                    bg_color = "rgba(239, 68, 68, 0.08)" if severity == "High" else "rgba(245, 158, 11, 0.08)" if severity == "Medium" else "rgba(16, 185, 129, 0.08)"
+                                if is_found and not is_missing:
+                                    checklist_html += f'<div style="font-size:0.9rem; display:flex; align-items:center; gap:8px; color:#ffffff;">🟢 <strong>{sc_name}</strong>: Identified</div>'
+                                else:
+                                    checklist_html += f'<div style="font-size:0.9rem; display:flex; align-items:center; gap:8px; color:#888888;">🔴 <span style="text-decoration: line-through;">{sc_name}</span>: Omitted</div>'
                                     
-                                    st.markdown(f"""
-                                    <div class="legal-card" style="background: {bg_color}; border-color: {color}30; border-left: 4px solid {color}; padding: 18px 24px;">
-                                        <div style="display: flex; align-items:center; justify-content:space-between;">
-                                            <span style="font-weight:600; color:#f8fafc; font-size:1.05rem;">{r.get('clause_type', 'General Term')}</span>
-                                            <span class="pill-status" style="background:{color}20; color:{color}; border: 1px solid {color}40;">{severity} Risk</span>
+                            checklist_html += '</div></div>'
+                            st.markdown(checklist_html, unsafe_allow_html=True)
+                            
+                            # Tabs
+                            tab_clauses, tab_risks, tab_gaps = st.tabs(["📌 Clauses Extracted", "⚠️ Risk Log", "❌ Compliance Gaps"])
+                            
+                            with tab_clauses:
+                                st.write(f"**Contract Structure:** {audit_report.get('contract_type', 'N/A')}")
+                                st.write(f"**Effective Date:** {audit_report.get('effective_date', 'N/A')}")
+                                st.write(f"**Identified Signatories:** {', '.join(audit_report.get('parties', []))}")
+                                
+                                clauses = audit_report.get("clauses_extracted", [])
+                                if clauses:
+                                    pd_clauses = pd.DataFrame(clauses)
+                                    pd_clauses.columns = ["Clause Category", "Summary of Terms", "Original Text Excerpt"]
+                                    st.dataframe(pd_clauses, use_container_width=True)
+                                else:
+                                    st.info("No primary clauses extracted.")
+                                    
+                            with tab_risks:
+                                risks = audit_report.get("risks_identified", [])
+                                if not risks:
+                                    st.success("No critical liabilities or legal risks identified in scanned text.")
+                                else:
+                                    for r in risks:
+                                        severity = r.get("severity", "Low")
+                                        color = "#ef4444" if severity == "High" else "#fbbf24" if severity == "Medium" else "#34d399"
+                                        bg_color = "rgba(239, 68, 68, 0.08)" if severity == "High" else "rgba(245, 158, 11, 0.08)" if severity == "Medium" else "rgba(16, 185, 129, 0.08)"
+                                        
+                                        st.markdown(f"""
+                                        <div class="legal-card" style="background: {bg_color}; border-color: {color}30; border-left: 4px solid {color}; padding: 18px 24px;">
+                                            <div style="display: flex; align-items:center; justify-content:space-between;">
+                                                <span style="font-weight:600; color:#f8fafc; font-size:1.05rem;">{r.get('clause_type', 'General Term')}</span>
+                                                <span class="pill-status" style="background:{color}20; color:{color}; border: 1px solid {color}40;">{severity} Risk</span>
+                                            </div>
+                                            <p style="margin-top: 10px; margin-bottom: 8px; color: #cbd5e1; font-size:0.92rem;"><strong>Scanned Liability:</strong> {r.get('description')}</p>
+                                            <p style="color: #38bdf8; font-size:0.92rem; margin-top:4px;"><strong>Mitigation Strategy:</strong> {r.get('mitigation')}</p>
                                         </div>
-                                        <p style="margin-top: 10px; margin-bottom: 8px; color: #cbd5e1; font-size:0.92rem;"><strong>Scanned Liability:</strong> {r.get('description')}</p>
-                                        <p style="color: #38bdf8; font-size:0.92rem; margin-top:4px;"><strong>Mitigation Strategy:</strong> {r.get('mitigation')}</p>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                                    
-                        with tab_gaps:
-                            gaps = audit_report.get("missing_clauses", [])
-                            if not gaps:
-                                st.success("No compliance omissions identified.")
+                                        """, unsafe_allow_html=True)
+                                        
+                            with tab_gaps:
+                                gaps = audit_report.get("missing_clauses", [])
+                                if not gaps:
+                                    st.success("No compliance omissions identified.")
+                                else:
+                                    for g in gaps:
+                                        st.markdown(f"""
+                                        <div class="legal-card" style="border-left: 4px solid #818cf8; padding: 18px 24px;">
+                                            <div style="font-weight:600; color:#a5b4fc; font-size:1rem; margin-bottom:6px;">⚠️ Missing clause: {g.get('clause_type')}</div>
+                                            <div style="color:#cbd5e1; font-size:0.9rem;">{g.get('explanation')}</div>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+
+        with auditor_tab2:
+            with st.container(border=True):
+                st.markdown("#### Clause-by-Clause Contract Comparison")
+                st.markdown("<p style='font-size:0.85rem; color:#64748b;'>Select two contracts from your secure vault to contrast their terms side-by-side.</p>", unsafe_allow_html=True)
+                
+                doc_options = {doc["id"]: doc["original_name"] for doc in processed_docs}
+                c_a, c_b = st.columns(2)
+                with c_a:
+                    selected_doc_a = st.selectbox("Contract A (Reference):", options=list(doc_options.keys()), format_func=lambda x: doc_options[x], key="compare_doc_a")
+                with c_b:
+                    default_idx_b = 1 if len(doc_options) > 1 else 0
+                    selected_doc_b = st.selectbox("Contract B (Proposed):", options=list(doc_options.keys()), index=default_idx_b, format_func=lambda x: doc_options[x], key="compare_doc_b")
+                
+                st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
+                trigger_compare = st.button("Contrast Contract Terms", type="primary", key="auditor_compare_btn")
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+            if trigger_compare:
+                if selected_doc_a == selected_doc_b:
+                    st.warning("Please select two different documents to compare.")
+                else:
+                    with st.spinner("Analyzing differences in liability, governing terms, and clauses..."):
+                        headers = {"Authorization": f"Bearer {st.session_state.token}"}
+                        payload = {"document_id_a": selected_doc_a, "document_id_b": selected_doc_b, "model_name": st.session_state.selected_model}
+                        try:
+                            r = requests.post(f"{API_URL}/api/compare-contracts", headers=headers, json=payload)
+                            if r.status_code == 200:
+                                res = r.json()
+                                st.markdown("### 📊 Comparative Analysis Report")
+                                st.markdown(res.get("comparison", ""))
+                                
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                st.download_button(
+                                    label="📥 Download Comparison Report (.md)",
+                                    data=res.get("comparison", ""),
+                                    file_name=f"contract_comparison_{selected_doc_a}_vs_{selected_doc_b}.md",
+                                    mime="text/markdown",
+                                    use_container_width=True
+                                )
                             else:
-                                for g in gaps:
-                                    st.markdown(f"""
-                                    <div class="legal-card" style="border-left: 4px solid #818cf8; padding: 18px 24px;">
-                                        <div style="font-weight:600; color:#a5b4fc; font-size:1rem; margin-bottom:6px;">⚠️ Missing clause: {g.get('clause_type')}</div>
-                                        <div style="color:#cbd5e1; font-size:0.9rem;">{g.get('explanation')}</div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                                st.error("Failed to run contract comparison.")
+                        except Exception as e:
+                            st.error(f"Error querying API: {e}")
 
 # VIEW: DOCUMENT DRAFTING
 elif choice == "✍️ Document Drafting":
@@ -1054,6 +992,169 @@ elif choice == "📅 Case Timeline":
             )
         else:
             st.info("The generated chronological event timeline will appear here after clicking 'Generate Case Timeline'.")
+
+# VIEW: LEGALESE TRANSLATOR
+elif choice == "⚖️ Legalese Translator":
+    st.markdown("<h1>Legalese to Plain English Translator</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#94a3b8;'>Translate dense legal clauses, jargon, or confusing text blocks into clear, understandable English.</p>", unsafe_allow_html=True)
+    
+    col_l, col_r = st.columns([1, 1.2])
+    with col_l:
+        st.markdown('<div class="legal-card">', unsafe_allow_html=True)
+        st.markdown("#### Input Legalese Text")
+        clause_input = st.text_area("Paste legal clause or contract text here:", height=250, placeholder="e.g. 'The Party of the First Part shall hold harmless and indemnify the Party of the Second Part from any and all liabilities, losses, damages...'")
+        
+        st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
+        trigger_translate = st.button("Translate to Plain English", type="primary")
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    with col_r:
+        st.markdown("### Simplified Breakdown")
+        if trigger_translate:
+            if not clause_input.strip():
+                st.warning("Please paste some text first.")
+            else:
+                with st.spinner("Translating legal terminology..."):
+                    headers = {"Authorization": f"Bearer {st.session_state.token}"}
+                    payload = {"clause_text": clause_input, "model_name": st.session_state.selected_model}
+                    try:
+                        r = requests.post(f"{API_URL}/api/simplify-clause", headers=headers, json=payload)
+                        if r.status_code == 200:
+                            res = r.json()
+                            simplified_content = res.get("simplified", "")
+                            st.markdown(simplified_content)
+                            
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            st.download_button(
+                                label="📥 Download Translation (.md)",
+                                data=simplified_content,
+                                file_name="legalese_simplified.md",
+                                mime="text/markdown",
+                                use_container_width=True
+                            )
+                        else:
+                            st.error("Failed to translate clause.")
+                    except Exception as e:
+                        st.error(f"Error connecting to backend: {e}")
+        else:
+            st.info("The simplified translation and risk analysis will appear here after clicking 'Translate to Plain English'.")
+
+# VIEW: DOCUMENT TEMPLATES
+elif choice == "📋 Document Templates":
+    st.markdown("<h1>Standard Legal Templates Directory</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#94a3b8;'>Generate standard, legally binding documents instantly by specifying custom variables.</p>", unsafe_allow_html=True)
+    
+    col_tmpl, col_out = st.columns([1, 1.2])
+    with col_tmpl:
+        st.markdown('<div class="legal-card">', unsafe_allow_html=True)
+        st.markdown("#### Select Template Type")
+        template_type = st.selectbox("Template Model:", [
+            "Mutual Non-Disclosure Agreement (NDA)", 
+            "Cease and Desist Demand Letter", 
+            "General Power of Attorney (PoA)", 
+            "Independent Contractor Services Agreement",
+            "Eviction Notice for Lease Default"
+        ])
+        
+        st.markdown("##### Template Variables")
+        
+        details = {}
+        if template_type == "Mutual Non-Disclosure Agreement (NDA)":
+            details["party_a"] = st.text_input("Party A (Disclosing):", placeholder="e.g. Acme Corp")
+            details["party_b"] = st.text_input("Party B (Receiving):", placeholder="e.g. John Doe Consulting")
+            details["purpose"] = st.text_input("Purpose of Disclosures:", placeholder="e.g. Evaluating a joint partnership")
+            details["jurisdiction"] = st.text_input("Governing State/Jurisdiction:", placeholder="e.g. California")
+            details["term"] = st.text_input("Duration of Confidentiality:", placeholder="e.g. 3 years")
+        
+        elif template_type == "Cease and Desist Demand Letter":
+            details["sender"] = st.text_input("Your Name / Firm Name:", placeholder="e.g. Aegis Law Group")
+            details["recipient"] = st.text_input("Recipient Name (Violator):", placeholder="e.g. BadActor LLC")
+            details["infringement_type"] = st.selectbox("Type of Violations:", ["Trademark Infringement", "Copyright Infringement", "Breach of Contract", "Harassment / Defamation"])
+            details["description"] = st.text_area("Description of violative acts:", placeholder="e.g. Unauthorized usage of our logo on their website")
+            details["deadline"] = st.text_input("Remedy Deadline (days):", placeholder="e.g. 10 days")
+            
+        elif template_type == "General Power of Attorney (PoA)":
+            details["principal"] = st.text_input("Principal Name (You):", placeholder="e.g. Alice Smith")
+            details["agent"] = st.text_input("Agent / Attorney-in-Fact Name:", placeholder="e.g. Bob Smith")
+            details["powers"] = st.text_area("Granted Powers (financial, medical, property):", placeholder="e.g. Manage all banking, real estate, and financial transactions")
+            details["revocation_terms"] = st.text_input("Expiration or Revocation Event:", placeholder="e.g. Upon written notice or principal's death")
+            
+        elif template_type == "Independent Contractor Services Agreement":
+            details["client"] = st.text_input("Client Name:", placeholder="e.g. Alpha Tech Inc")
+            details["contractor"] = st.text_input("Contractor Name:", placeholder="e.g. Sarah Jenkins")
+            details["services"] = st.text_area("Scope of Services:", placeholder="e.g. React Native software development and UI styling")
+            details["compensation"] = st.text_input("Compensation (rate & schedule):", placeholder="e.g. $85 per hour, payable bi-weekly")
+            details["termination"] = st.text_input("Termination Notice period:", placeholder="e.g. 14 days written notice")
+            
+        elif template_type == "Eviction Notice for Lease Default":
+            details["landlord"] = st.text_input("Landlord / Owner Name:", placeholder="e.g. Sterling Properties LLC")
+            details["tenant"] = st.text_input("Tenant Name:", placeholder="e.g. David Miller")
+            details["address"] = st.text_input("Property Leased Address:", placeholder="e.g. Apartment 4B, 123 Main St, Boston MA")
+            details["violation"] = st.selectbox("Reason for Default Notice:", ["Non-payment of rent", "Unauthorized pets", "Property damage", "Nuisance / Noise complaints"])
+            details["rent_amount"] = st.text_input("Amount Owed (if applicable):", placeholder="e.g. $2,400 (for May 2026)")
+            details["remedy_period"] = st.text_input("Days to Cure violation:", placeholder="e.g. 7 days")
+            
+        st.markdown("<div style='margin-top: 15px;'>", unsafe_allow_html=True)
+        trigger_generate = st.button("Generate Template Draft", type="primary")
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    with col_out:
+        st.markdown("### Output Template Viewer")
+        
+        if "template_draft_content" not in st.session_state:
+            st.session_state.template_draft_content = ""
+            
+        if trigger_generate:
+            details_parts = [f"- {k.replace('_', ' ').capitalize()}: {v}" for k, v in details.items()]
+            details_str = "\n".join(details_parts)
+            
+            instructions_prompt = (
+                f"Draft a formal, legally structured {template_type} document using standard legal language.\n"
+                f"Use the following custom variable inputs exactly as specified:\n"
+                f"{details_str}\n\n"
+                "Include standard boilerplate clauses like Governing Law, Entire Agreement, and Severability where applicable. Leave blanks for signatures."
+            )
+            
+            with st.spinner("AI generating legal document structure..."):
+                headers = {"Authorization": f"Bearer {st.session_state.token}"}
+                payload = {"instructions": instructions_prompt, "reference_doc_ids": [], "model_name": st.session_state.selected_model}
+                try:
+                    r = requests.post(f"{API_URL}/api/draft-document", headers=headers, json=payload)
+                    if r.status_code == 200:
+                        st.session_state.template_draft_content = r.json().get("drafted_content", "")
+                        st.rerun()
+                    else:
+                        st.error("Failed to generate template.")
+                except Exception as e:
+                    st.error(f"Drafting error: {e}")
+                    
+        if st.session_state.template_draft_content:
+            st.text_area("Review / Modify Template:", value=st.session_state.template_draft_content, height=450, key="template_content_view")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            col_t_txt, col_t_docx = st.columns(2)
+            with col_t_txt:
+                st.download_button(
+                    label="📥 Download Draft (.txt)",
+                    data=st.session_state.template_draft_content,
+                    file_name="legal_template_output.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+            with col_t_docx:
+                docx_bytes = generate_docx_bytes(st.session_state.template_draft_content)
+                if docx_bytes:
+                    st.download_button(
+                        label="📥 Download Draft (.docx)",
+                        data=docx_bytes,
+                        file_name="legal_template_output.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True
+                    )
+        else:
+            st.info("The generated legal template will appear here after clicking 'Generate Template Draft'.")
 
 # VIEW: SECURITY AUDIT TRAIL
 elif choice == "📋 Security Audit Trail":

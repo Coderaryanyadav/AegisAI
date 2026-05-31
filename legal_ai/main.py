@@ -195,6 +195,15 @@ class TimelineRequest(BaseModel):
     document_ids: List[int]
     model_name: Optional[str] = None
 
+class CompareRequest(BaseModel):
+    document_id_a: int
+    document_id_b: int
+    model_name: Optional[str] = None
+
+class SimplifyRequest(BaseModel):
+    clause_text: str
+    model_name: Optional[str] = None
+
 # Document processing background helper
 def process_document_background(
     doc_id: int, 
@@ -528,4 +537,66 @@ def generate_event_timeline(
     )
     
     return {"timeline_markdown": timeline_md}
+
+@app.post("/api/compare-contracts")
+def compare_contract_documents(
+    request: Request,
+    compare_req: CompareRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(RoleChecker(allowed_roles=["admin", "lawyer"]))
+):
+    """Compare two documents clause-by-clause and outline critical differences."""
+    doc_a = crud.get_document(db, compare_req.document_id_a)
+    doc_b = crud.get_document(db, compare_req.document_id_b)
+    if not doc_a or not doc_b:
+        raise HTTPException(status_code=404, detail="One or both documents not found")
+        
+    if current_user.role != "admin":
+        if doc_a.owner_id != current_user.id or doc_b.owner_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access one or both documents")
+            
+    engine = LegalRAGEngine()
+    comparison_report = engine.compare_contracts(
+        doc_id_a=compare_req.document_id_a,
+        doc_id_b=compare_req.document_id_b,
+        model_name=compare_req.model_name
+    )
+    
+    crud.create_audit_log(
+        db,
+        action="CONTRACT_COMPARISON",
+        user_id=current_user.id,
+        user_email=current_user.email,
+        target_type="SYSTEM",
+        details=f"Compared document {doc_a.original_name} (ID: {doc_a.id}) with {doc_b.original_name} (ID: {doc_b.id})",
+        ip_address=get_client_ip(request)
+    )
+    
+    return comparison_report
+
+@app.post("/api/simplify-clause")
+def simplify_clause_endpoint(
+    request: Request,
+    simplify_req: SimplifyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(RoleChecker(allowed_roles=["admin", "lawyer"]))
+):
+    """Translate complex legalese into clear, plain English and outline rights/risks."""
+    engine = LegalRAGEngine()
+    simplified = engine.simplify_clause(
+        clause_text=simplify_req.clause_text,
+        model_name=simplify_req.model_name
+    )
+    
+    crud.create_audit_log(
+        db,
+        action="CLAUSE_SIMPLIFIED",
+        user_id=current_user.id,
+        user_email=current_user.email,
+        target_type="SYSTEM",
+        details=f"Simplified a clause of length {len(simplify_req.clause_text)}",
+        ip_address=get_client_ip(request)
+    )
+    
+    return {"simplified": simplified}
 

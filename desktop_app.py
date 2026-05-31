@@ -123,7 +123,7 @@ if __name__ == "__main__":
         # Configure Streamlit programmatic environment settings
         bootstrap.run(
             frontend_path, 
-            "streamlit run", 
+            False, 
             [], 
             flag_options={
                 "server.port": 8501,

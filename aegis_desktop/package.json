@@ -1,0 +1,45 @@
+{
+  "name": "aegis-desktop",
+  "version": "1.0.0",
+  "description": "Desktop shell wrapper for AegisAI Offline Legal Suite",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac"
+  },
+  "dependencies": {
+    "find-process": "^1.4.7",
+    "portfinder": "^1.0.32"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.aegis.legalai",
+    "productName": "AegisAI",
+    "directories": {
+      "output": "../dist_desktop"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "node_modules/**/*",
+      "out/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/aegis_backend",
+        "to": "aegis_backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.business",
+      "target": ["dmg"]
+    }
+  }
+}
