@@ -2,6 +2,7 @@ import os
 import json
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, TypeDecorator, event
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -19,14 +20,18 @@ DB_PATH = os.path.join(AEGIS_DIR, "aegis_ai.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"check_same_thread": False}
+    DATABASE_URL,
+    connect_args={"check_same_thread": False, "timeout": 30.0},
+    pool_size=10,
+    max_overflow=20
 )
 
 @event.listens_for(Engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -90,7 +95,7 @@ class Matter(Base):
     __tablename__ = "matters"
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
-    case_number = Column(String, unique=True, index=True, nullable=True)
+    case_number = Column(String, index=True, nullable=True)
     title = Column(String, nullable=False)
     court = Column(String, nullable=True)
     judge = Column(String, nullable=True)
@@ -202,7 +207,7 @@ class TwoFactorSecret(Base):
     __tablename__ = "two_factor_secrets"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
-    totp_secret = Column(String, nullable=False)
+    totp_secret = Column(EncryptedText, nullable=False)
     is_enabled = Column(Boolean, default=False)
     recovery_codes = Column(Text, nullable=True)  # JSON list of hashed codes
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -235,6 +240,13 @@ def init_db():
             conn.commit()
     except Exception as ex:
         print(f"Offline migrations error: {ex}")
+
+    # Ensure a partial unique index on case_number that only applies to non-null values
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_matters_case_number_notnull ON matters(case_number) WHERE case_number IS NOT NULL"))
+    except Exception as ex:
+        print(f"Could not create partial unique index for case_number: {ex}")
 
     db = SessionLocal()
     try:
@@ -326,6 +338,10 @@ def init_db():
             db.commit()
     except Exception as e:
         print(f"Error seeding default admin account: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
     finally:
         db.close()
 
@@ -333,5 +349,8 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

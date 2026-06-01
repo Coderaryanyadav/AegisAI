@@ -134,6 +134,10 @@ class BackupManager:
 
             except Exception as e:
                 logger.error(f"Backup creation failed: {e}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
                 history = BackupHistory(
                     backup_name=backup_name,
                     backup_size_bytes=0,
@@ -142,8 +146,14 @@ class BackupManager:
                     status="failed",
                     error_message=str(e)
                 )
-                db.add(history)
-                db.commit()
+                try:
+                    db.add(history)
+                    db.commit()
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
                 raise e
             finally:
                 db.close()
@@ -219,8 +229,8 @@ async def run_backup_scheduler(interval_seconds: int = 3600, retention_limit: in
     logger.info("AegisAI Backup Scheduler daemon started.")
     while True:
         try:
-            # Create automated backup
-            BackupManager.create_backup(is_manual=False)
+            # Create automated backup in a thread to avoid blocking the event loop
+            await asyncio.to_thread(BackupManager.create_backup, None, False)
 
             # Prune old automated backups
             db = SessionLocal()
@@ -243,6 +253,10 @@ async def run_backup_scheduler(interval_seconds: int = 3600, retention_limit: in
                     db.commit()
             except Exception as pe:
                 logger.error(f"Error during backup pruning: {pe}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
             finally:
                 db.close()
 

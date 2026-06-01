@@ -16,7 +16,7 @@ class OllamaService:
     async def get_available_models() -> List[str]:
         """Fetches list of models currently pulled in local Ollama."""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
                 if response.status_code == 200:
                     data = response.json()
@@ -84,7 +84,10 @@ class OllamaService:
             payload["format"] = "json"
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            # Allow environment override or per-call timeout; default to 180s for local model runs
+            default_timeout = float(os.environ.get("OLLAMA_DEFAULT_TIMEOUT", "180"))
+            client_timeout = default_timeout
+            async with httpx.AsyncClient(timeout=client_timeout) as client:
                 response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
                 if response.status_code == 200:
                     data = response.json()
@@ -293,15 +296,27 @@ class OllamaService:
     @classmethod
     async def generate_structured(
         cls,
-        model: str,
-        prompt: str,
+        model: Optional[str] = None,
+        model_name: Optional[str] = None,
+        prompt: Optional[str] = None,
+        user_prompt: Optional[str] = None,
         system_prompt: Optional[str] = None,
+        schema_hint: Optional[str] = None,
         temperature: float = 0.1
     ) -> Dict[str, Any]:
         """Queries Ollama and ensures the response is parsed as a JSON object."""
+        # Resolve model param (accept both `model` and `model_name` callers)
+        resolved_model = model_name or model
+
+        # Construct prompt from possible parts
+        resolved_prompt = prompt or user_prompt or ""
+        if schema_hint:
+            # Append schema hint to help offline heuristics
+            resolved_prompt = f"{resolved_prompt}\n\nSchema Hint:\n{schema_hint}\n\nJSON Output:"
+
         result = await cls.generate_completion(
-            model=model,
-            prompt=prompt,
+            model=resolved_model,
+            prompt=resolved_prompt,
             system_prompt=system_prompt,
             json_mode=True,
             temperature=temperature

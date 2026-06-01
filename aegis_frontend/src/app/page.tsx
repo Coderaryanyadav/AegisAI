@@ -1,20 +1,21 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Shield, Scale, FileText, Calendar, Database, Search, 
   Trash2, Upload, AlertTriangle, Play, RefreshCw, Key, 
-  Users, CheckSquare, Plus, Clock, FileDiff, Download, Info,
+  Users, Plus, Clock, FileDiff, Download, Info,
   Lock, DollarSign, BarChart2, Mic, MicOff, Globe, TrendingUp,
-  MessageCircle, BookOpen, Zap, Settings, Bell
+  MessageCircle, Settings
 } from "lucide-react";
 
 const API_BASE = "http://localhost:8000";
 
 // PDF export helper (jsPDF)
-const exportToPDF = (title: string, content: string, firmName?: string, logoBase64?: string) => {
+const exportToPDF = async (title: string, content: string, firmName?: string, logoBase64?: string) => {
   try {
-    const { jsPDF } = require("jspdf");
+    const { jsPDF } = await import("jspdf");
     const doc = new jsPDF();
     let currentY = 20;
 
@@ -86,7 +87,10 @@ const PRECEDENT_LINKS = [
 
 export default function Home() {
   // Authentication State
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("aegis_token") || "";
+  });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("lawyer");
@@ -117,8 +121,11 @@ export default function Home() {
   
   // Forms
   const [newClient, setNewClient] = useState({ name: "", email: "", phone: "", notes: "" });
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [newMatter, setNewMatter] = useState({ title: "", case_number: "", court: "", judge: "", opponent_name: "", opposing_advocate: "", facts: "", cnr_number: "" });
+  const [isCreatingMatter, setIsCreatingMatter] = useState(false);
   const [newSchedule, setNewSchedule] = useState({ title: "", schedule_type: "hearing", target_date: "", notes: "" });
+  const [isCreatingSchedule, setIsCreatingSchedule] = useState(false);
 
   // Conflict Checker States
   const [checkConflictClient, setCheckConflictClient] = useState("");
@@ -192,9 +199,11 @@ export default function Home() {
   const [notification, setNotification] = useState<any>(null);
 
   // Language toggle (en / hi)
-  const [lang, setLang] = useState<"en" | "hi">("en");
-  const t = (key: string) => LANG[lang]?.[key] || LANG["en"][key] || key;
-
+  const [lang, setLang] = useState<"en" | "hi">(() => {
+    if (typeof window === "undefined") return "en";
+    const saved = localStorage.getItem("aegis_lang");
+    return saved === "hi" ? "hi" : "en";
+  });
   // Billing / Invoice State
   const [billingMatterId, setBillingMatterId] = useState<number | null>(null);
   const [timeEntries, setTimeEntries] = useState<any[]>([]);
@@ -204,6 +213,7 @@ export default function Home() {
   const [billingTimer, setBillingTimer] = useState<any>(null); // { start: Date, running: bool }
   const [timerSeconds, setTimerSeconds] = useState(0);
   const timerRef = useRef<any>(null);
+  const notificationTimeoutRef = useRef<any>(null);
 
   // Analytics State
   const [analyticsData, setAnalyticsData] = useState<any>(null);
@@ -243,7 +253,6 @@ export default function Home() {
 
   // Hearing Notification State
   const [upcomingAlerts, setUpcomingAlerts] = useState<any[]>([]);
-  const [showAlertsPanel, setShowAlertsPanel] = useState(false);
 
   // Citation Graph Precedents State
   const [selectedPrecedent, setSelectedPrecedent] = useState<any>(null);
@@ -254,8 +263,9 @@ export default function Home() {
   const [onlineModeSyncing, setOnlineModeSyncing] = useState(false);
   const [onlineModeResult, setOnlineModeResult] = useState<any>(null);
 
-  // Sync online mode state to backend so verify_offline_mode guard works
   const syncOnlineMode = async (online: boolean) => {
+    const effectiveToken = token || localStorage.getItem("aegis_token");
+    if (!effectiveToken) return;
     try {
       await fetchWithAuth(`${API_BASE}/api/system/connection-mode`, {
         method: "POST",
@@ -276,6 +286,7 @@ export default function Home() {
   };
 
   // Keep track of active tab legality under RBAC
+  /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
   useEffect(() => {
     if (currentUser) {
       const role = currentUser.role || "lawyer";
@@ -285,8 +296,10 @@ export default function Home() {
       }
     }
   }, [currentUser, activeTab]);
+  /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 
   // Hearing notification polling (every 5 minutes)
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     if (!token) return;
     const poll = async () => {
@@ -311,6 +324,7 @@ export default function Home() {
     const id = setInterval(poll, 300000);
     return () => clearInterval(id);
   }, [token]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // Request notification permission
   useEffect(() => {
@@ -322,50 +336,43 @@ export default function Home() {
   // Billing timer tick
   useEffect(() => {
     if (billingTimer?.running) {
-      timerRef.current = setInterval(() => setTimerSeconds(s => s + 1), 1000);
+      if (!timerRef.current) {
+        timerRef.current = setInterval(() => setTimerSeconds(s => s + 1), 1000);
+      }
     } else {
-      clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     }
-    return () => clearInterval(timerRef.current);
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
   }, [billingTimer?.running]);
-
-  // Load lang from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("aegis_lang") as any;
-    if (saved) setLang(saved);
-  }, []);
-
-  const toggleLang = () => {
-    const next = lang === "en" ? "hi" : "en";
-    setLang(next);
-    localStorage.setItem("aegis_lang", next);
-  };
 
   // Initialization & Token Checks
   useEffect(() => {
-    const savedToken = localStorage.getItem("aegis_token");
-    if (savedToken) {
-      setToken(savedToken);
-      fetchCurrentUser(savedToken);
-    }
-  }, []);
-
-  useEffect(() => {
     if (token) {
+      fetchCurrentUser(token);
       fetchSystemStatus();
       fetchClients();
       fetchBackupHistory();
       fetchDraftTemplates();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   useEffect(() => {
+    setBillingMatterId(null);
+    setTimeEntries([]);
+    setInvoices([]);
     if (selectedClient) {
       fetchMatters(selectedClient.id);
-      setSelectedMatter(null);
-      setSchedules([]);
-      setDocuments([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClient]);
 
   useEffect(() => {
@@ -373,25 +380,63 @@ export default function Home() {
       fetchBackupHistory();
       fetchAuditLogs();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, token, currentUser]);
 
   useEffect(() => {
+    clearTransientTabState();
     if (selectedMatter) {
       fetchSchedules(selectedMatter.id);
       fetchDocuments(selectedMatter.id);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMatter]);
 
-  const showNotification = (message, type = "info") => {
+  const clearTransientTabState = () => {
+    setRagResult("");
+    setRagSources([]);
+    setAnalyzerTimeline([]);
+    setAnalyzerFacts(null);
+    setAuditRisks([]);
+    setCompareResults([]);
+    setGeneratedDraft("");
+    setConflictResult(null);
+    setPreviewText("");
+    setCauseListMatches([]);
+    setSelectedDocForAnalysis(null);
+    setFirDocIds([]);
+    setTranscribedText("");
+    setTwoFaCode("");
+    setPreviewDoc(null);
+    setAnnotationDocId(null);
+    setNewAnnotationText("");
+    setNewAnnotationNote("");
+  };
+
+  const handleTabChange = (tab: string, action?: () => void) => {
+    clearTransientTabState();
+    setActiveTab(tab);
+    if (action) action();
+  };
+
+  const showNotification = (message: string, type: "info" | "success" | "error" | "warning" = "info") => {
+    if (notificationTimeoutRef.current) {
+      clearTimeout(notificationTimeoutRef.current);
+    }
     setNotification({ message, type });
-    setTimeout(() => setNotification(null), 5000);
+    notificationTimeoutRef.current = setTimeout(() => {
+      setNotification(null);
+      notificationTimeoutRef.current = null;
+    }, 5000);
   };
 
   // HTTP Helper wrapper
   const fetchWithAuth = async (url: string, options: any = {}) => {
     const headers = options.headers || {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
+    // Always prefer current token in state, fallback to localStorage for freshness
+    const effectiveToken = token || localStorage.getItem("aegis_token");
+    if (effectiveToken) {
+      headers["Authorization"] = `Bearer ${effectiveToken}`;
     }
     
     const response = await fetch(url, {
@@ -432,6 +477,8 @@ export default function Home() {
       localStorage.setItem("aegis_token", data.access_token);
       setToken(data.access_token);
       showNotification("Sign in successful!", "success");
+      // Clear sensitive fields from UI and load user profile
+      setPassword("");
       fetchCurrentUser(data.access_token);
     } catch (err) {
       showNotification(err.message, "error");
@@ -440,6 +487,10 @@ export default function Home() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
+    if (!email.trim() || !password.trim()) {
+      showNotification("Email and password are required", "error");
+      return;
+    }
     try {
       const response = await fetch(`${API_BASE}/api/auth/register`, {
         method: "POST",
@@ -453,9 +504,10 @@ export default function Home() {
       }
 
       showNotification("Account created! Please sign in.", "success");
+      setPassword("");
       setIsRegisterMode(false);
-    } catch (err) {
-      showNotification(err.message, "error");
+    } catch (err: any) {
+      showNotification(err.message || "Registration failed", "error");
     }
   };
 
@@ -483,8 +535,40 @@ export default function Home() {
   const handleSignOut = () => {
     localStorage.removeItem("aegis_token");
     setToken("");
+    // Clear all user-scoped state to avoid leakage between sessions
     setCurrentUser(null);
-    showNotification("Signed out successfully.");
+    setClients([]);
+    setMatters([]);
+    setSelectedClient(null);
+    setSelectedMatter(null);
+    setSchedules([]);
+    setDocuments([]);
+    setTemplates([]);
+    setGeneratedDraft("");
+    setInvoices([]);
+    setTimeEntries([]);
+    setPreviewDoc(null);
+    setPreviewText("");
+    setTwoFaEnabled(false);
+    setTwoFaQr("");
+    setTwoFaSecret("");
+    setTwoFaCode("");
+    setBillingTimer(null);
+    setTimerSeconds(0);
+    setFirmName("");
+    setFirmLogo("");
+    setEmail("");
+    setPassword("");
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop?.();
+      mediaRecorderRef.current = null;
+    }
+    setIsRecording(false);
+    showNotification("Signed out successfully.", "success");
   };
 
   const fetchSystemStatus = async () => {
@@ -516,6 +600,11 @@ export default function Home() {
 
   const handleCreateClient = async (e) => {
     e.preventDefault();
+    if (!newClient.name.trim()) {
+      showNotification("Client name is required", "error");
+      return;
+    }
+    setIsCreatingClient(true);
     try {
       const response = await fetchWithAuth(`${API_BASE}/api/clients`, {
         method: "POST",
@@ -526,9 +615,14 @@ export default function Home() {
         showNotification("Client directory entry created", "success");
         setNewClient({ name: "", email: "", phone: "", notes: "" });
         fetchClients();
+      } else {
+        const errData = await response.json();
+        throw new Error(errData.detail || "Failed to create client");
       }
-    } catch (err) {
-      showNotification(err.message, "error");
+    } catch (err: any) {
+      showNotification(err.message || "Failed to create client", "error");
+    } finally {
+      setIsCreatingClient(false);
     }
   };
 
@@ -548,7 +642,7 @@ export default function Home() {
     }
   };
 
-  const fetchMatters = async (clientId) => {
+  async function fetchMatters(clientId: string) {
     try {
       const response = await fetchWithAuth(`${API_BASE}/api/matters?client_id=${clientId}`);
       if (response.ok) {
@@ -558,7 +652,7 @@ export default function Home() {
     } catch (err) {
       console.error(err);
     }
-  };
+  }
 
   const handleCheckConflict = async (e: any) => {
     if (e) e.preventDefault();
@@ -598,6 +692,15 @@ export default function Home() {
 
   const handleCreateMatter = async (e) => {
     e.preventDefault();
+    if (!selectedClient) {
+      showNotification("Please select a client before creating a matter", "error");
+      return;
+    }
+    if (!newMatter.title.trim()) {
+      showNotification("Matter title is required", "error");
+      return;
+    }
+    setIsCreatingMatter(true);
     try {
       const response = await fetchWithAuth(`${API_BASE}/api/matters`, {
         method: "POST",
@@ -608,29 +711,19 @@ export default function Home() {
         showNotification("Matter created successfully", "success");
         setNewMatter({ title: "", case_number: "", court: "", judge: "", opponent_name: "", opposing_advocate: "", facts: "", cnr_number: "" });
         fetchMatters(selectedClient.id);
+      } else {
+        const errData = await response.json();
+        throw new Error(errData.detail || "Failed to create matter");
       }
-    } catch (err) {
-      showNotification(err.message, "error");
+    } catch (err: any) {
+      showNotification(err.message || "Failed to create matter", "error");
+    } finally {
+      setIsCreatingMatter(false);
     }
   };
 
-  const handleDeleteMatter = async (matterId) => {
-    if (!confirm("Are you sure you want to delete this case matter file?")) return;
-    try {
-      const response = await fetchWithAuth(`${API_BASE}/api/matters/${matterId}`, {
-        method: "DELETE"
-      });
-      if (response.ok) {
-        showNotification("Matter file deleted.");
-        setSelectedMatter(null);
-        fetchMatters(selectedClient.id);
-      }
-    } catch (err) {
-      showNotification(err.message, "error");
-    }
-  };
 
-  const fetchSchedules = async (matterId) => {
+  async function fetchSchedules(matterId: string) {
     try {
       const response = await fetchWithAuth(`${API_BASE}/api/schedules?matter_id=${matterId}`);
       if (response.ok) {
@@ -640,10 +733,19 @@ export default function Home() {
     } catch (err) {
       console.error(err);
     }
-  };
+  }
 
   const handleCreateSchedule = async (e) => {
     e.preventDefault();
+    if (!selectedMatter) {
+      showNotification("Please select a matter before scheduling an event", "error");
+      return;
+    }
+    if (!newSchedule.title.trim() || !newSchedule.target_date.trim()) {
+      showNotification("Schedule title and target date are required", "error");
+      return;
+    }
+    setIsCreatingSchedule(true);
     try {
       const response = await fetchWithAuth(`${API_BASE}/api/schedules`, {
         method: "POST",
@@ -654,9 +756,14 @@ export default function Home() {
         showNotification("Event schedule added", "success");
         setNewSchedule({ title: "", schedule_type: "hearing", target_date: "", notes: "" });
         fetchSchedules(selectedMatter.id);
+      } else {
+        const errData = await response.json();
+        throw new Error(errData.detail || "Failed to create schedule");
       }
-    } catch (err) {
-      showNotification(err.message, "error");
+    } catch (err: any) {
+      showNotification(err.message || "Failed to create schedule", "error");
+    } finally {
+      setIsCreatingSchedule(false);
     }
   };
 
@@ -673,7 +780,7 @@ export default function Home() {
     }
   };
 
-  const fetchDocuments = async (matterId) => {
+  async function fetchDocuments(matterId: string) {
     try {
       const response = await fetchWithAuth(`${API_BASE}/api/documents?matter_id=${matterId}`);
       if (response.ok) {
@@ -683,7 +790,7 @@ export default function Home() {
     } catch (err) {
       console.error(err);
     }
-  };
+  }
 
   const handleUploadDocument = async (e) => {
     const file = e.target.files[0];
@@ -746,10 +853,18 @@ export default function Home() {
       }
     } catch (err: any) {
       showNotification(err.message, "error");
-      setShowPreviewModal(false);
+      handleClosePreview();
     } finally {
       setPreviewLoading(false);
     }
+  };
+  const handleClosePreview = () => {
+    setShowPreviewModal(false);
+    setPreviewDoc(null);
+    setPreviewText("");
+    setAnnotationDocId(null);
+    setNewAnnotationText("");
+    setNewAnnotationNote("");
   };
 
   const handleCauseListUpload = async (e: any) => {
@@ -829,13 +944,14 @@ export default function Home() {
     if (!helperSection.trim()) return;
     setHelperResult(null);
     try {
-      const response = await fetch(`${API_BASE}/api/helper/ipc-bns?act=${helperAct}&section=${helperSection}`);
+      const response = await fetchWithAuth(`${API_BASE}/api/helper/ipc-bns?act=${helperAct}&section=${helperSection}`);
       if (!response.ok) {
         throw new Error("Section mapping not found.");
       }
       const data = await response.json();
       setHelperResult(data);
-    } catch (err) {
+      setHelperSection(""); // Clear input after successful conversion
+    } catch (err: any) {
       showNotification(err.message, "error");
     }
   };
@@ -916,8 +1032,14 @@ export default function Home() {
   };
 
   const handleDeleteTimeEntry = async (id: number) => {
-    await fetchWithAuth(`${API_BASE}/api/billing/time-entry/${id}`, { method: "DELETE" });
-    if (billingMatterId) fetchTimeEntries(billingMatterId);
+    if (!confirm("Are you sure you want to delete this time entry?")) return;
+    try {
+      await fetchWithAuth(`${API_BASE}/api/billing/time-entry/${id}`, { method: "DELETE" });
+      showNotification("Time entry deleted.", "success");
+      if (billingMatterId) fetchTimeEntries(billingMatterId);
+    } catch (e: any) {
+      showNotification(e.message || "Failed to delete time entry", "error");
+    }
   };
 
   const handleGenerateInvoice = async () => {
@@ -1000,6 +1122,7 @@ export default function Home() {
       if (res.ok) {
         setTwoFaEnabled(true);
         setTwoFaQr("");
+        setTwoFaCode("");
         showNotification("2FA enabled successfully!", "success");
       } else { showNotification("Invalid TOTP code", "error"); }
     } catch (e: any) { showNotification(e.message, "error"); }
@@ -1121,8 +1244,14 @@ export default function Home() {
   };
 
   const handleDeleteAnnotation = async (id: number) => {
-    await fetchWithAuth(`${API_BASE}/api/annotations/${id}`, { method: "DELETE" });
-    if (annotationDocId) fetchAnnotations(annotationDocId);
+    if (!confirm("Are you sure you want to delete this highlight annotation?")) return;
+    try {
+      await fetchWithAuth(`${API_BASE}/api/annotations/${id}`, { method: "DELETE" });
+      showNotification("Annotation deleted.", "success");
+      if (annotationDocId) fetchAnnotations(annotationDocId);
+    } catch (e: any) {
+      showNotification(e.message || "Failed to delete annotation", "error");
+    }
   };
 
 
@@ -1255,7 +1384,7 @@ export default function Home() {
   };
 
   // Backup calls
-  const fetchBackupHistory = async () => {
+  async function fetchBackupHistory() {
     try {
       const response = await fetchWithAuth(`${API_BASE}/api/backup/history`);
       if (response.ok) {
@@ -1265,9 +1394,9 @@ export default function Home() {
     } catch (err) {
       console.error(err);
     }
-  };
+  }
 
-  const fetchAuditLogs = async () => {
+  async function fetchAuditLogs() {
     try {
       const response = await fetchWithAuth(`${API_BASE}/api/system/audit-logs`);
       if (response.ok) {
@@ -1277,7 +1406,7 @@ export default function Home() {
     } catch (err) {
       console.error(err);
     }
-  };
+  }
 
   const handleExportAuditLogs = async () => {
     try {
@@ -1545,7 +1674,7 @@ export default function Home() {
                 <li>Only eCourts sync will be permitted during this session</li>
                 <li>No local AI inference runs while online</li>
                 <li>Internet access is strictly limited to eCourts API only</li>
-                <li>Click <strong>"Go Offline"</strong> to restore full local access</li>
+                <li>Click <strong>&quot;Go Offline&quot;</strong> to restore full local access</li>
               </ul>
             </div>
 
@@ -1693,7 +1822,7 @@ export default function Home() {
           <div className="space-y-1">
             {(currentUser?.role === "admin" || currentUser?.role === "lawyer" || currentUser?.role === "client") && (
               <button 
-                onClick={() => setActiveTab("dashboard")}
+                onClick={() => handleTabChange("dashboard")}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "dashboard" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
                 <Scale className="w-4 h-4" />
@@ -1702,7 +1831,7 @@ export default function Home() {
             )}
             {(currentUser?.role === "admin" || currentUser?.role === "lawyer") && (
               <button 
-                onClick={() => setActiveTab("crm")}
+                onClick={() => handleTabChange("crm")}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "crm" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
                 <Users className="w-4 h-4" />
@@ -1710,7 +1839,7 @@ export default function Home() {
               </button>
             )}
             <button 
-              onClick={() => setActiveTab("research")}
+              onClick={() => handleTabChange("research")}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "research" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
             >
               <Search className="w-4 h-4" />
@@ -1718,7 +1847,7 @@ export default function Home() {
             </button>
             {(currentUser?.role === "admin" || currentUser?.role === "lawyer") && (
               <button 
-                onClick={() => setActiveTab("analyzer")}
+                onClick={() => handleTabChange("analyzer")}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "analyzer" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
                 <Clock className="w-4 h-4" />
@@ -1727,7 +1856,7 @@ export default function Home() {
             )}
             {(currentUser?.role === "admin" || currentUser?.role === "auditor") && (
               <button 
-                onClick={() => setActiveTab("auditor")}
+                onClick={() => handleTabChange("auditor")}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "auditor" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
                 <FileDiff className="w-4 h-4" />
@@ -1736,7 +1865,7 @@ export default function Home() {
             )}
             {(currentUser?.role === "admin" || currentUser?.role === "lawyer") && (
               <button 
-                onClick={() => setActiveTab("drafting")}
+                onClick={() => handleTabChange("drafting")}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "drafting" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
                 <FileText className="w-4 h-4" />
@@ -1745,7 +1874,13 @@ export default function Home() {
             )}
             {(currentUser?.role === "admin" || currentUser?.role === "lawyer" || currentUser?.role === "client") && (
               <button
-                onClick={() => { setActiveTab("billing"); if (selectedMatter) { setBillingMatterId(selectedMatter.id); fetchTimeEntries(selectedMatter.id); fetchInvoices(); } }}
+                onClick={() => handleTabChange("billing", () => {
+                  if (selectedMatter) {
+                    setBillingMatterId(selectedMatter.id);
+                    fetchTimeEntries(selectedMatter.id);
+                    fetchInvoices();
+                  }
+                })}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "billing" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
                 <DollarSign className="w-4 h-4" />
@@ -1754,7 +1889,7 @@ export default function Home() {
             )}
             {(currentUser?.role === "admin" || currentUser?.role === "lawyer") && (
               <button
-                onClick={() => { setActiveTab("analytics"); fetchAnalytics(); }}
+                onClick={() => handleTabChange("analytics", fetchAnalytics)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "analytics" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
                 <BarChart2 className="w-4 h-4" />
@@ -1762,7 +1897,7 @@ export default function Home() {
               </button>
             )}
             <button
-              onClick={() => { setActiveTab("settings"); check2FAStatus(); }}
+              onClick={() => handleTabChange("settings", check2FAStatus)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "settings" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
             >
               <Settings className="w-4 h-4" />
@@ -1770,7 +1905,7 @@ export default function Home() {
             </button>
             {currentUser?.role === "admin" && (
               <button
-                onClick={() => setActiveTab("backup")}
+                onClick={() => handleTabChange("backup")}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "backup" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
                 <Lock className="w-4 h-4" />
@@ -1839,7 +1974,12 @@ export default function Home() {
                     {clients.map(c => (
                       <button 
                         key={c.id} 
-                        onClick={() => setSelectedClient(c)}
+                        onClick={() => {
+                          setSelectedClient(c);
+                          setSelectedMatter(null);
+                          setSchedules([]);
+                          setDocuments([]);
+                        }}
                         className={`w-full text-left p-2 rounded-lg text-sm transition ${selectedClient?.id === c.id ? "bg-zinc-800 text-zinc-100 border border-zinc-700" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"}`}
                       >
                         {c.name}
@@ -1983,8 +2123,8 @@ export default function Home() {
                     <div className="space-y-2 pt-1">
                       <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider font-mono">Auto-Scheduled Hearings Matching Your Matters</h4>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[180px] overflow-y-auto">
-                        {causeListMatches.map((m, idx) => (
-                          <div key={idx} className="p-3 bg-emerald-950/20 border border-emerald-900/60 rounded-xl text-xs flex flex-col justify-between">
+                        {causeListMatches.map((m) => (
+                          <div key={m.matter_id} className="p-3 bg-emerald-950/20 border border-emerald-900/60 rounded-xl text-xs flex flex-col justify-between">
                             <div>
                               <div className="font-bold text-emerald-400 font-mono">{m.case_number}</div>
                               <div className="text-zinc-200 font-medium mt-0.5">{m.title}</div>
@@ -2239,6 +2379,7 @@ export default function Home() {
                       <button 
                         type="submit"
                         className="px-4 py-2.5 bg-zinc-50 hover:bg-zinc-200 text-zinc-950 font-medium rounded-lg text-xs shadow transition"
+                        disabled={isCreatingMatter}
                       >
                         Create Matter File
                       </button>
@@ -2307,6 +2448,7 @@ export default function Home() {
                       <button 
                         type="submit"
                         className="w-full py-2.5 bg-zinc-50 hover:bg-zinc-200 text-zinc-950 font-medium rounded-lg text-xs shadow transition"
+                        disabled={isCreatingClient}
                       >
                         Encrypt & Save Client
                       </button>
@@ -3766,8 +3908,8 @@ export default function Home() {
                       </button>
                     </div>
                     <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {timeEntries.map((e, i) => (
-                        <div key={i} className="flex justify-between items-center p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs">
+                      {timeEntries.map((e) => (
+                        <div key={e.id} className="flex justify-between items-center p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs">
                           <div>
                             <p className="text-zinc-200 font-medium">{e.description}</p>
                             <p className="text-zinc-500">{e.date} &middot; {e.hours}h &times; &#8377;{e.rate_per_hour}</p>
@@ -3810,8 +3952,8 @@ export default function Home() {
                   
                   <div className="space-y-2 max-h-[400px] overflow-y-auto pt-1">
                     <h4 className="text-[10px] text-zinc-500 font-bold uppercase">All Invoices</h4>
-                    {invoices.map((inv, i) => (
-                      <div key={i} className="flex justify-between items-center p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs hover:border-zinc-700 transition">
+                    {invoices.map((inv) => (
+                      <div key={inv.id} className="flex justify-between items-center p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg text-xs hover:border-zinc-700 transition">
                         <div>
                           <p className="text-zinc-200 font-mono font-semibold">{inv.invoice_number}</p>
                           <p className="text-zinc-500">{new Date(inv.created_at).toLocaleDateString("en-IN")}</p>
@@ -3858,14 +4000,14 @@ export default function Home() {
                 <>
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     {[
-                      { label: "Total Clients", value: analyticsData.total_clients, color: "text-blue-400", icon: "&#128100;" },
-                      { label: "Active Matters", value: analyticsData.open_matters, color: "text-emerald-400", icon: "&#9878;&#65039;" },
-                      { label: "Documents", value: analyticsData.total_documents, color: "text-violet-400", icon: "&#128196;" },
-                      { label: "Total Revenue", value: `&#8377;${analyticsData.total_revenue_inr?.toLocaleString("en-IN")}`, color: "text-amber-400", icon: "&#128176;" },
+                      { label: "Total Clients", value: analyticsData.total_clients, color: "text-blue-400", icon: "👤" },
+                      { label: "Active Matters", value: analyticsData.open_matters, color: "text-emerald-400", icon: "⚖️" },
+                      { label: "Documents", value: analyticsData.total_documents, color: "text-violet-400", icon: "📄" },
+                      { label: "Total Revenue", value: `₹${analyticsData.total_revenue_inr?.toLocaleString("en-IN")}`, color: "text-amber-400", icon: "💰" },
                     ].map((stat, i) => (
                       <div key={i} className="border border-zinc-800 bg-zinc-900/30 p-5 rounded-xl">
-                        <p className="text-2xl mb-1" dangerouslySetInnerHTML={{__html: stat.icon}} />
-                        <p className={`text-xl font-bold tabular-nums ${stat.color}`} dangerouslySetInnerHTML={{__html: String(stat.value)}} />
+                        <p className="text-2xl mb-1">{stat.icon}</p>
+                        <p className={`text-xl font-bold tabular-nums ${stat.color}`}>{stat.value}</p>
                         <p className="text-[11px] text-zinc-500 mt-1">{stat.label}</p>
                       </div>
                     ))}
@@ -3884,8 +4026,8 @@ export default function Home() {
                         </div>
                       </div>
                       <h4 className="text-[10px] text-zinc-500 font-bold uppercase mt-2">Recent Invoices</h4>
-                      {analyticsData.recent_invoices?.map((inv: any, i: number) => (
-                        <div key={i} className="flex justify-between items-center py-1.5 border-b border-zinc-800/50 text-xs">
+                       {analyticsData.recent_invoices?.map((inv: any) => (
+                        <div key={inv.id} className="flex justify-between items-center py-1.5 border-b border-zinc-800/50 text-xs">
                           <span className="text-zinc-300 font-mono">{inv.invoice_number}</span>
                           <div className="flex items-center gap-2">
                             <span className="text-zinc-100">&#8377;{inv.grand_total}</span>
@@ -3897,8 +4039,8 @@ export default function Home() {
                     <div className="border border-zinc-800 bg-zinc-900/30 p-5 rounded-xl space-y-3">
                       <h3 className="text-sm font-bold text-zinc-200">Hearings (Next 7 Days)</h3>
                       {analyticsData.upcoming_hearings?.length === 0 && <p className="text-xs text-zinc-500 italic">No hearings in next 7 days.</p>}
-                      {analyticsData.upcoming_hearings?.map((h: any, i: number) => (
-                        <div key={i} className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg flex justify-between items-start text-xs">
+                      {analyticsData.upcoming_hearings?.map((h: any) => (
+                        <div key={h.id} className="p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg flex justify-between items-start text-xs">
                           <div>
                             <p className="text-zinc-200 font-semibold">{h.title}</p>
                             <p className="text-zinc-500">{new Date(h.target_date).toLocaleDateString("en-IN", {weekday: "short", day: "numeric", month: "short"})}</p>
@@ -3971,8 +4113,8 @@ export default function Home() {
                   <h3 className="text-sm font-bold text-zinc-200">Hearing Alerts</h3>
                   <p className="text-xs text-zinc-400">Desktop notifications for hearings within 48 hours.</p>
                   <p className="text-[11px] text-zinc-500">Upcoming (next 48h): {upcomingAlerts.length}</p>
-                  {upcomingAlerts.slice(0, 3).map((a, i) => (
-                    <div key={i} className="flex justify-between items-center text-xs p-2 bg-amber-950/20 border border-amber-900/30 rounded-lg">
+                  {upcomingAlerts.slice(0, 3).map((a) => (
+                    <div key={a.id} className="flex justify-between items-center text-xs p-2 bg-amber-950/20 border border-amber-900/30 rounded-lg">
                       <span className="text-amber-300">{a.title}</span>
                       <span className="text-zinc-500">{new Date(a.target_date).toLocaleDateString("en-IN")}</span>
                     </div>
@@ -4078,7 +4220,7 @@ export default function Home() {
                   <span className="text-[10px] text-zinc-500 font-mono">EXTRACTED EVIDENCE TEXT & ANNOTATIONS</span>
                 </div>
                 <button 
-                  onClick={() => setShowPreviewModal(false)}
+                  onClick={handleClosePreview}
                   className="text-zinc-500 hover:text-white px-3 py-1.5 border border-zinc-850 rounded-lg text-xs font-medium cursor-pointer bg-zinc-950"
                 >
                   Close Drawer
@@ -4164,15 +4306,15 @@ export default function Home() {
                   {/* Annotations List */}
                   <div className="flex-1 overflow-y-auto space-y-2">
                     <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Saved Highlights</span>
-                    {docAnnotations.map((ann, idx) => (
+                    {docAnnotations.map((ann) => (
                       <div 
-                        key={idx} 
+                        key={ann.id} 
                         className="p-3 border rounded-xl text-xs space-y-1 bg-zinc-950/20"
                         style={{ borderColor: ann.color === "yellow" ? "#854d0e" : ann.color === "green" ? "#166534" : "#9d174d" }}
                       >
                         <div className="flex justify-between items-start gap-2">
                           <span className="font-mono text-[10px] font-semibold italic bg-zinc-900 px-1 py-0.5 rounded truncate" style={{ color: ann.color === "yellow" ? "#fef08a" : ann.color === "green" ? "#bbf7d0" : "#fbcfe8" }}>
-                            "{ann.selected_text}"
+                            &quot;{ann.selected_text}&quot;
                           </span>
                           <button onClick={() => handleDeleteAnnotation(ann.id)} className="text-zinc-600 hover:text-rose-400 shrink-0">
                             <Trash2 className="w-3.5 h-3.5" />

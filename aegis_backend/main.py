@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import bcrypt
 import jwt
 from pydantic import BaseModel, EmailStr
@@ -61,24 +62,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("AEGIS_ACCESS_TOKEN_EXPIRE_MINU
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
 vector_store = LocalVectorStore()
 
-SYSTEM_ONLINE_MODE = False
 
-def verify_offline_mode():
-    if SYSTEM_ONLINE_MODE:
-        raise HTTPException(
-            status_code=423,
-            detail="System is currently in Online Sync Mode. Modifications are locked. Please toggle back to Offline Mode to enable edits."
-        )
-
-@app.get("/api/system/connection-mode")
-def get_connection_mode(current_user: User = Depends(get_current_user)):
-    return {"online": SYSTEM_ONLINE_MODE}
-
-@app.post("/api/system/connection-mode")
-def set_connection_mode(req: Dict[str, bool], current_user: User = Depends(get_current_user)):
-    global SYSTEM_ONLINE_MODE
-    SYSTEM_ONLINE_MODE = req.get("online", False)
-    return {"online": SYSTEM_ONLINE_MODE}
 
 async def ensure_ollama_runtime():
     """Starts local Ollama daemon if offline and pre-pulls reasoning models."""
@@ -199,7 +183,10 @@ def log_audit_trail(db: Session, email: str, action: str, target_type: str, targ
         details=details
     )
     db.add(log)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
 
 def chunk_text(text: str, chunk_size: int = 400, chunk_overlap: int = 80) -> List[str]:
     """Helper to split document text into dense context chunks."""
@@ -213,6 +200,41 @@ def chunk_text(text: str, chunk_size: int = 400, chunk_overlap: int = 80) -> Lis
         if i >= len(words):
             break
     return chunks
+
+
+def _safe_db_rollback(db_candidate=None):
+    """Attempt to rollback a SQLAlchemy session if provided; swallow any errors."""
+    try:
+        db = db_candidate
+        if db is None:
+            return
+        if hasattr(db, "rollback"):
+            db.rollback()
+    except Exception:
+        pass
+
+# ================= ONLINE MODE GUARD =================
+
+SYSTEM_ONLINE_MODE = False
+
+def verify_offline_mode():
+    if SYSTEM_ONLINE_MODE:
+        raise HTTPException(
+            status_code=423,
+            detail="System is currently in Online Sync Mode. Modifications are locked. Please toggle back to Offline Mode to enable edits."
+        )
+    return True
+
+@app.get("/api/system/connection-mode")
+def get_connection_mode(current_user: User = Depends(get_current_user)):
+    return {"online": SYSTEM_ONLINE_MODE}
+
+@app.post("/api/system/connection-mode")
+def set_connection_mode(req: Dict[str, bool], current_user: User = Depends(get_current_user)):
+    global SYSTEM_ONLINE_MODE
+    SYSTEM_ONLINE_MODE = req.get("online", False)
+    return {"online": SYSTEM_ONLINE_MODE}
+
 
 # ================= PYDANTIC SCHEMAS =================
 
@@ -229,7 +251,7 @@ class UserResponse(BaseModel):
     firm_name: Optional[str] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class FirmSettingsUpdate(BaseModel):
     firm_name: str
@@ -479,7 +501,7 @@ def delete_matter(id: int, db: Session = Depends(get_db), current_user: User = D
     return {"status": "success"}
 
 @app.post("/api/matters/{id}/sync-ecourts")
-def sync_ecourts_cnr(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def sync_ecourts_cnr(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     matter = db.query(Matter).filter(Matter.id == id).first()
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
@@ -487,17 +509,19 @@ def sync_ecourts_cnr(id: int, db: Session = Depends(get_db), current_user: User 
         raise HTTPException(status_code=400, detail="No CNR number registered for this matter")
     if matter.is_locked:
         return {"status": "locked", "message": "This matter's data has been locked locally to prevent remote tampering or hijacking."}
-        
-    # Check actual internet connectivity
+    
+    # Check actual internet connectivity (async)
     import httpx
     is_online = False
     try:
-        res = httpx.get("https://www.google.com", timeout=3.0)
-        if res.status_code == 200:
-            is_online = True
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get("https://www.google.com")
+            if res.status_code == 200:
+                is_online = True
     except Exception:
+        _safe_db_rollback(locals().get('db') if 'db' in locals() else None)
         pass
-        
+
     if not is_online:
         raise HTTPException(
             status_code=503,
@@ -505,14 +529,14 @@ def sync_ecourts_cnr(id: int, db: Session = Depends(get_db), current_user: User 
         )
 
     logger.info(f"Establishing temporary secure connection to eCourts for CNR {matter.cnr_number}...")
-    
+
     # Call online latency test target to simulate actual remote API request delay
     try:
-        httpx.get("https://httpbin.org/delay/1", timeout=5.0)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.get("https://httpbin.org/delay/1")
     except Exception as e:
         logger.warning(f"eCourts latency simulation request failed: {e}")
-
-    logger.info("Sync complete. Terminating eCourts connection. Locking data locally. Air-gap re-established.")
+        _safe_db_rollback(locals().get('db') if 'db' in locals() else None)
     
     import random
     judges = ["Hon'ble Mr. Justice D. Y. Chandrachud", "Hon'ble Mrs. Justice Hima Kohli", "Hon'ble Mr. Justice Sanjiv Khanna"]
@@ -567,7 +591,7 @@ def sync_ecourts_cnr(id: int, db: Session = Depends(get_db), current_user: User 
     }
 
 @app.get("/api/ecourts/lookup")
-def ecourts_lookup(cnr: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def ecourts_lookup(cnr: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Standalone eCourts CNR lookup for the Online Mode panel.
     Does NOT modify any local matter data — pure read-only lookup.
@@ -579,14 +603,16 @@ def ecourts_lookup(cnr: str, current_user: User = Depends(get_current_user), db:
 
     cnr = cnr.strip().upper()
 
-    # Check actual internet connectivity
+    # Check actual internet connectivity (async)
     import httpx
     is_online = False
     try:
-        res = httpx.get("https://www.google.com", timeout=3.0)
-        if res.status_code == 200:
-            is_online = True
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get("https://www.google.com")
+            if res.status_code == 200:
+                is_online = True
     except Exception:
+        _safe_db_rollback(locals().get('db') if 'db' in locals() else None)
         pass
 
     if not is_online:
@@ -798,6 +824,10 @@ def process_uploaded_document_task(doc_id: int, file_path: str, db_session_facto
         logger.info(f"Processed and indexed document: {doc.original_name}")
     except Exception as e:
         logger.error(f"Failed to process document {doc_id}: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
         doc.status = "failed"
     finally:
         db.commit()
@@ -993,6 +1023,7 @@ def parse_cause_list(
     except Exception as e:
         if os.path.exists(temp_pdf_path):
             os.remove(temp_pdf_path)
+        _safe_db_rollback(locals().get('db') if 'db' in locals() else None)
         raise HTTPException(status_code=400, detail=f"Failed to read Cause List PDF: {e}")
         
     if os.path.exists(temp_pdf_path):
@@ -1057,7 +1088,7 @@ def parse_cause_list(
 
 # 8. SCANNED CASE ANALYZER (Timeline & Fact Extractors)
 @app.post("/api/analyze/extract-timeline")
-async def extract_case_timeline(document_id: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db)):
+async def extract_case_timeline(document_id: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1090,7 +1121,7 @@ async def extract_case_timeline(document_id: int, model_name: str = "deepseek-r1
     return {"timeline": timeline}
 
 @app.post("/api/analyze/facts")
-async def extract_case_facts(document_id: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db)):
+async def extract_case_facts(document_id: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1125,7 +1156,7 @@ async def extract_case_facts(document_id: int, model_name: str = "deepseek-r1:8b
 
 # 9. CONTRACT AUDITOR (Indemnity, Risk Scanning, Compare Clauses)
 @app.post("/api/audit/risk-scan")
-async def scan_contract_risks(document_id: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db)):
+async def scan_contract_risks(document_id: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1157,7 +1188,7 @@ async def scan_contract_risks(document_id: int, model_name: str = "deepseek-r1:8
     return {"risks": risks}
 
 @app.post("/api/audit/compare")
-async def compare_clauses(doc_id_a: int, doc_id_b: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db)):
+async def compare_clauses(doc_id_a: int, doc_id_b: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     doc_a = db.query(Document).filter(Document.id == doc_id_a).first()
     doc_b = db.query(Document).filter(Document.id == doc_id_b).first()
     if not doc_a or not doc_b:
@@ -1219,7 +1250,7 @@ async def simplify_clause_endpoint(req: SimplifyClauseRequest, current_user: Use
 
 # 10. DOCUMENT DRAFTING
 @app.get("/api/draft/templates")
-def list_draft_templates():
+def list_draft_templates(current_user: User = Depends(get_current_user)):
     return [
         {
             "id": "legal_notice",
@@ -1239,7 +1270,7 @@ def list_draft_templates():
     ]
 
 @app.post("/api/draft/generate")
-async def generate_draft(template_id: str, fields: Dict[str, str], model_name: str = "deepseek-r1:8b"):
+async def generate_draft(template_id: str, fields: Dict[str, str], model_name: str = "deepseek-r1:8b", current_user: User = Depends(get_current_user)):
     prompt = (
         f"Draft a formal, legally enforceable Indian document of type: '{template_id}'.\n"
         f"Use the following custom details in the draft:\n{json.dumps(fields, indent=2)}\n\n"
@@ -1258,7 +1289,7 @@ async def generate_draft(template_id: str, fields: Dict[str, str], model_name: s
     return {"draft": draft_text}
 
 @app.post("/api/draft/format")
-def format_legal_draft(req: FormatDraftRequest):
+def format_legal_draft(req: FormatDraftRequest, current_user: User = Depends(get_current_user)):
     formatted_lines = []
     
     # 1. Apply Court Header Template
@@ -1392,8 +1423,20 @@ def trigger_manual_backup(current_user: User = Depends(get_current_user)):
 @app.post("/api/backup/restore")
 def trigger_restore(backup_path: str, current_user: User = Depends(get_current_user)):
     try:
-        BackupManager.restore_backup(backup_path)
+        # Normalize and restrict restores to the backups directory to prevent path traversal
+        if not os.path.isabs(backup_path):
+            candidate = os.path.abspath(os.path.join(AEGIS_DIR, "backups", backup_path))
+        else:
+            candidate = os.path.abspath(backup_path)
+
+        backups_dir = os.path.abspath(os.path.join(AEGIS_DIR, "backups"))
+        if not os.path.commonpath([candidate, backups_dir]) == backups_dir:
+            raise HTTPException(status_code=400, detail="Invalid backup path")
+
+        BackupManager.restore_backup(candidate)
         return {"status": "success", "message": "Restore completed. Application state reverted."}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Restoration failed: {e}")
 
@@ -1441,6 +1484,10 @@ def emergency_panic_button(db: Session = Depends(get_db), current_user: User = D
         }
     except Exception as e:
         logger.error(f"Panic recovery routine failed: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=f"Panic wipe routine encountered error: {e}")
 
 
@@ -1527,8 +1574,19 @@ def create_invoice(req: InvoiceCreate, db: Session = Depends(get_db), current_us
         notes=req.notes
     )
     db.add(invoice)
-    db.commit()
-    db.refresh(invoice)
+    # Commit with retry in case of race condition on unique invoice_number
+    for attempt in range(3):
+        try:
+            db.commit()
+            db.refresh(invoice)
+            break
+        except IntegrityError:
+            db.rollback()
+            # regenerate invoice number and retry
+            invoice.invoice_number = f"INV-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+            attempt += 1
+            if attempt >= 3:
+                raise HTTPException(status_code=500, detail="Could not generate unique invoice number after retries")
     log_audit_trail(db, current_user.email, "CREATE", "invoice", invoice.invoice_number)
     return {
         "id": invoice.id, "invoice_number": invoice.invoice_number,
@@ -1778,6 +1836,7 @@ Return ONLY valid JSON."""
         log_audit_trail(db, current_user.email, "FIR_ANALYZE", "documents", str(req.document_ids))
         return result
     except Exception as e:
+        _safe_db_rollback(locals().get('db') if 'db' in locals() else None)
         raise HTTPException(status_code=500, detail=str(e))
 
 
