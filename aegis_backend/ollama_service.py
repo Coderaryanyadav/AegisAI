@@ -40,18 +40,26 @@ class OllamaService:
         # Resolve to a local model fallback if the requested model is not present
         try:
             available = await cls.get_available_models()
-            if available and model not in available:
-                # 1. Clean comparison names
-                requested_base = model.split(":")[0].lower()
-                matched = None
-                
-                # 2. Try prefix matching (e.g. deepseek-r1:8b matches deepseek-r1)
+        except Exception as e:
+            logger.warning(f"Error checking available models for fallback: {e}")
+            available = []
+
+        models_to_try = []
+        if available:
+            # 1. Clean comparison names
+            requested_base = model.split(":")[0].lower()
+            matched = None
+            
+            if model in available:
+                matched = model
+            else:
+                # 2. Try prefix matching
                 for m in available:
                     if requested_base in m.lower():
                         matched = m
                         break
                 
-                # 3. Fallback to any model containing common legal assistant keywords
+                # 3. Fallback to any model containing common keywords
                 if not matched:
                     for keyword in ["qwen", "llama", "deepseek", "mistral", "phi"]:
                         for m in available:
@@ -64,36 +72,47 @@ class OllamaService:
                 # 4. Fallback to the first available model in list
                 if not matched:
                     matched = available[0]
-                    
-                logger.info(f"Model '{model}' not found locally. Automatically falling back to active local model: '{matched}'")
-                model = matched
-        except Exception as e:
-            logger.warning(f"Error checking available models for fallback: {e}")
+            
+            models_to_try.append(matched)
+            # Add the rest for fallbacks in case of generation failure
+            for m in available:
+                if m not in models_to_try:
+                    models_to_try.append(m)
+        else:
+            models_to_try.append(model)
 
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature
+        last_exception = None
+        for current_model in models_to_try:
+            payload = {
+                "model": current_model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": temperature
+                }
             }
-        }
-        if system_prompt:
-            payload["system"] = system_prompt
-        if json_mode:
-            payload["format"] = "json"
+            if system_prompt:
+                payload["system"] = system_prompt
+            if json_mode:
+                payload["format"] = "json"
 
+            try:
+                default_timeout = float(os.environ.get("OLLAMA_DEFAULT_TIMEOUT", "180"))
+                async with httpx.AsyncClient(timeout=default_timeout) as client:
+                    response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
+                    if response.status_code == 200:
+                        data = response.json()
+                        return data.get("response", "").strip()
+                    else:
+                        raise RuntimeError(f"Ollama API returned error: {response.text}")
+            except Exception as e:
+                logger.warning(f"Generation failed with model '{current_model}': {e}. Attempting fallback to next model...")
+                last_exception = e
+                continue
+                
+        # If all models fail, catch and fall through to offline heuristics
         try:
-            # Allow environment override or per-call timeout; default to 180s for local model runs
-            default_timeout = float(os.environ.get("OLLAMA_DEFAULT_TIMEOUT", "180"))
-            client_timeout = default_timeout
-            async with httpx.AsyncClient(timeout=client_timeout) as client:
-                response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
-                if response.status_code == 200:
-                    data = response.json()
-                    return data.get("response", "").strip()
-                else:
-                    raise RuntimeError(f"Ollama API returned error: {response.text}")
+            raise last_exception or RuntimeError("No models available or all models failed.")
         except Exception as e:
             # Find snippet
             snippet = ""

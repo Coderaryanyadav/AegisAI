@@ -199,11 +199,14 @@ export default function Home() {
   const [notification, setNotification] = useState<any>(null);
 
   // Language toggle (en / hi)
-  const [lang, setLang] = useState<"en" | "hi">(() => {
-    if (typeof window === "undefined") return "en";
-    const saved = localStorage.getItem("aegis_lang");
-    return saved === "hi" ? "hi" : "en";
-  });
+  const [lang, setLang] = useState<"en" | "hi">("en");
+  
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("aegis_lang");
+      if (saved === "hi") setLang("hi");
+    }
+  }, []);
   // Billing / Invoice State
   const [billingMatterId, setBillingMatterId] = useState<number | null>(null);
   const [timeEntries, setTimeEntries] = useState<any[]>([]);
@@ -352,7 +355,7 @@ export default function Home() {
       }
     };
   }, [billingTimer?.running]);
-
+  /* eslint-disable */
   // Initialization & Token Checks
   useEffect(() => {
     if (token) {
@@ -362,7 +365,6 @@ export default function Home() {
       fetchBackupHistory();
       fetchDraftTemplates();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   useEffect(() => {
@@ -372,7 +374,6 @@ export default function Home() {
     if (selectedClient) {
       fetchMatters(selectedClient.id);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClient]);
 
   useEffect(() => {
@@ -380,7 +381,6 @@ export default function Home() {
       fetchBackupHistory();
       fetchAuditLogs();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, token, currentUser]);
 
   useEffect(() => {
@@ -389,8 +389,8 @@ export default function Home() {
       fetchSchedules(selectedMatter.id);
       fetchDocuments(selectedMatter.id);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMatter]);
+  /* eslint-enable */
 
   const clearTransientTabState = () => {
     setRagResult("");
@@ -1587,6 +1587,8 @@ export default function Home() {
     );
   }
 
+
+
   return (
     <div className="min-h-screen flex flex-col bg-[#030303] text-zinc-100">
       {/* Top Banner Navigation */}
@@ -1884,7 +1886,7 @@ export default function Home() {
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "billing" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
                 <DollarSign className="w-4 h-4" />
-                {lang === "hi" ? "बिलिंग" : "Billing & Invoices"}
+                {LANG[lang].billing}
               </button>
             )}
             {(currentUser?.role === "admin" || currentUser?.role === "lawyer") && (
@@ -1893,7 +1895,7 @@ export default function Home() {
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "analytics" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
               >
                 <BarChart2 className="w-4 h-4" />
-                {lang === "hi" ? "विश्लेषण" : "Analytics"}
+                {LANG[lang].analytics}
               </button>
             )}
             <button
@@ -1901,7 +1903,7 @@ export default function Home() {
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${activeTab === "settings" ? "bg-zinc-900/80 text-white border border-zinc-800 font-semibold shadow-inner" : "text-zinc-400 hover:bg-zinc-900/30 hover:text-zinc-200"}`}
             >
               <Settings className="w-4 h-4" />
-              {lang === "hi" ? "सेटिंग्स" : "Settings"}
+              {LANG[lang].settings}
             </button>
             {currentUser?.role === "admin" && (
               <button
@@ -3864,7 +3866,7 @@ export default function Home() {
           {activeTab === "billing" && (
             <div className="space-y-6 animate-fade-in">
               <div>
-                <h1 className="text-2xl font-bold tracking-tight">{lang === "hi" ? "\u092c\u093f\u0932\u093f\u0902\u0917 \u0914\u0930 \u091a\u093e\u0932\u093e\u0928" : "Billing & Invoices"}</h1>
+                <h1 className="text-2xl font-bold tracking-tight">{LANG[lang].billing}</h1>
                 <p className="text-sm text-zinc-400">Track billable hours, generate GST-compliant invoices, and manage payments.</p>
               </div>
               {selectedClient && (

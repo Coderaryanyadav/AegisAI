@@ -22,8 +22,8 @@ DATABASE_URL = f"sqlite:///{DB_PATH}"
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False, "timeout": 30.0},
-    pool_size=10,
-    max_overflow=20
+    pool_size=100,
+    max_overflow=300
 )
 
 @event.listens_for(Engine, "connect")
@@ -105,6 +105,7 @@ class Matter(Base):
     facts = Column(EncryptedText, nullable=True) # Transparently Encrypted case facts
     cnr_number = Column(String, nullable=True)
     is_locked = Column(Boolean, default=False, nullable=False)
+    hmac_signature = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     client = relationship("Client", back_populates="matters")
@@ -229,6 +230,8 @@ def init_db():
                 conn.execute(text("ALTER TABLE matters ADD COLUMN cnr_number TEXT"))
             if "is_locked" not in existing_cols:
                 conn.execute(text("ALTER TABLE matters ADD COLUMN is_locked INTEGER DEFAULT 0"))
+            if "hmac_signature" not in existing_cols:
+                conn.execute(text("ALTER TABLE matters ADD COLUMN hmac_signature TEXT"))
                 
             user_info = conn.execute(text("PRAGMA table_info(users)")).fetchall()
             existing_user_cols = [row[1] for row in user_info]

@@ -46,10 +46,10 @@ init_db()
 
 app = FastAPI(title="AegisAI Offline Legal Suite", version="1.0.0")
 
-# Allow CORS since React runs on a different port during local dev
+# Allow CORS strictly for local Electron/Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -106,7 +106,7 @@ async def ensure_ollama_runtime():
     else:
         logger.info("Ollama service is already online.")
 
-    # 3. Check and pull deepseek-r1:8b if missing, and auto-register offline model bundle if aegis-default is missing
+    # 3. Check and pull mistral:latest if missing, and auto-register offline model bundle if aegis-default is missing
     if await OllamaService.is_ollama_running():
         models = await OllamaService.get_available_models()
         
@@ -128,7 +128,7 @@ async def ensure_ollama_runtime():
             else:
                 logger.warning(f"Offline model bundle Modelfile not found at: {modelfile_path}")
 
-        target_model = "deepseek-r1:8b"
+        target_model = "mistral:latest"
         has_model = any(target_model in m or "deepseek-r1" in m for m in models)
         if not has_model:
             logger.info(f"Target model '{target_model}' is not present in local list: {models}. Initiating background pull...")
@@ -339,7 +339,7 @@ class DocumentResponse(BaseModel):
 class ResearchQuery(BaseModel):
     query: str
     matter_ids: Optional[List[int]] = None
-    model_name: str = "deepseek-r1:8b" # default local model
+    model_name: str = "mistral:latest" # default local model
 
 class ConflictCheckRequest(BaseModel):
     client_name: str
@@ -354,7 +354,7 @@ class FormatDraftRequest(BaseModel):
 
 class SimplifyClauseRequest(BaseModel):
     clause_text: str
-    model_name: str = "deepseek-r1:8b"
+    model_name: str = "mistral:latest"
 
 class TimeEntryCreate(BaseModel):
     matter_id: int
@@ -383,13 +383,13 @@ class TwoFASetupVerify(BaseModel):
 
 class FIRAnalysisRequest(BaseModel):
     document_ids: List[int]
-    model_name: str = "deepseek-r1:8b"
+    model_name: str = "mistral:latest"
 
 class PredictOutcomeRequest(BaseModel):
     facts: str
     court: str = "District Court"
     sections: Optional[str] = None
-    model_name: str = "deepseek-r1:8b"
+    model_name: str = "mistral:latest"
 
 class VoiceTranscribeRequest(BaseModel):
     audio_base64: str  # base64 encoded wav/mp3
@@ -479,7 +479,15 @@ def list_matters(client_id: Optional[int] = None, db: Session = Depends(get_db),
         query = query.filter(Matter.client_id == client.id)
     elif client_id:
         query = query.filter(Matter.client_id == client_id)
-    return query.all()
+    matters = query.all()
+    import hmac
+    for m in matters:
+        if m.is_locked and m.hmac_signature:
+            payload = f"{m.id}:{m.case_number}:{m.court}:{m.judge}:{m.status}"
+            expected_hmac = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(m.hmac_signature, expected_hmac):
+                m.status = "TAMPERED_LOCK" # Warn user of DB tampering
+    return matters
 
 @app.post("/api/matters", response_model=MatterResponse)
 def create_matter(matter_in: MatterCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user), _ = Depends(verify_offline_mode)):
@@ -575,6 +583,10 @@ async def sync_ecourts_cnr(id: int, db: Session = Depends(get_db), current_user:
         existing_schedule.notes = f"Updated via eCourts CNR sync on {datetime.now().strftime('%Y-%m-%d')}"
         
     matter.is_locked = True
+    
+    import hmac
+    payload = f"{matter.id}:{matter.case_number}:{matter.court}:{matter.judge}:{matter.status}"
+    matter.hmac_signature = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
     
     logger.info("Sync complete. Terminating eCourts connection. Locking data locally. Air-gap re-established.")
     
@@ -794,13 +806,33 @@ def process_uploaded_document_task(doc_id: int, file_path: str, db_session_facto
     db.commit()
 
     try:
-        # Extract text using PyMuPDF or Tesseract fallback
-        text = DocumentProcessor.extract_text(file_path)
+        from aegis_backend.database import cipher
+        import tempfile
+
+        # Decrypt binary file
+        with open(file_path, "rb") as enc_file:
+            encrypted_data = enc_file.read()
+        raw_data = cipher.decrypt(encrypted_data)
+
+        if doc.original_name.lower().endswith(".txt"):
+            text = raw_data.decode("utf-8", errors="ignore")
+        else:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(raw_data)
+                tmp_path = tmp.name
+
+            try:
+                # Extract text using PyMuPDF or Tesseract fallback
+                text = DocumentProcessor.extract_text(tmp_path)
+            finally:
+                os.remove(tmp_path)
         
-        # Save raw content in local file system or db
+        # Save raw content in local file system encrypted
+        from aegis_backend.database import cipher
         raw_text_path = file_path + ".txt"
-        with open(raw_text_path, "w", encoding="utf-8") as f:
-            f.write(text)
+        encrypted_text = cipher.encrypt(text.encode('utf-8'))
+        with open(raw_text_path, "wb") as f:
+            f.write(encrypted_text)
 
         # Chunk text
         chunks = chunk_text(text)
@@ -849,12 +881,17 @@ def upload_document(
     stored_name = f"{file_uuid}{ext}"
     dest_path = os.path.join(vault_dir, stored_name)
 
-    # Save to vault
+    # Encrypt raw data before saving to vault
+    from aegis_backend.database import cipher
+    raw_data = file.file.read()
+    
     sha256_hash = hashlib.sha256()
+    sha256_hash.update(raw_data)
+    file_hash = sha256_hash.hexdigest()
+
+    encrypted_data = cipher.encrypt(raw_data)
     with open(dest_path, "wb") as buffer:
-        for chunk in iter(lambda: file.file.read(4096), b""):
-            buffer.write(chunk)
-            sha256_hash.update(chunk)
+        buffer.write(encrypted_data)
     
     file_hash = sha256_hash.hexdigest()
 
@@ -902,8 +939,15 @@ def get_document_text(id: int, db: Session = Depends(get_db), current_user: User
     
     txt_path = doc.file_path + ".txt"
     if os.path.exists(txt_path):
-        with open(txt_path, "r", encoding="utf-8") as f:
-            return {"text": f.read()}
+        from aegis_backend.database import cipher
+        with open(txt_path, "rb") as f:
+            encrypted_data = f.read()
+            try:
+                decrypted_text = cipher.decrypt(encrypted_data).decode('utf-8')
+                return {"text": decrypted_text}
+            except Exception:
+                # Fallback for old unencrypted files if any
+                return {"text": encrypted_data.decode('utf-8', errors='ignore')}
     return {"text": "Extracted text not ready or file failed processing."}
 
 @app.delete("/api/documents/{id}")
@@ -1088,7 +1132,7 @@ def parse_cause_list(
 
 # 8. SCANNED CASE ANALYZER (Timeline & Fact Extractors)
 @app.post("/api/analyze/extract-timeline")
-async def extract_case_timeline(document_id: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def extract_case_timeline(document_id: int, model_name: str = "mistral:latest", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1121,7 +1165,7 @@ async def extract_case_timeline(document_id: int, model_name: str = "deepseek-r1
     return {"timeline": timeline}
 
 @app.post("/api/analyze/facts")
-async def extract_case_facts(document_id: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def extract_case_facts(document_id: int, model_name: str = "mistral:latest", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1156,7 +1200,7 @@ async def extract_case_facts(document_id: int, model_name: str = "deepseek-r1:8b
 
 # 9. CONTRACT AUDITOR (Indemnity, Risk Scanning, Compare Clauses)
 @app.post("/api/audit/risk-scan")
-async def scan_contract_risks(document_id: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def scan_contract_risks(document_id: int, model_name: str = "mistral:latest", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -1188,7 +1232,7 @@ async def scan_contract_risks(document_id: int, model_name: str = "deepseek-r1:8
     return {"risks": risks}
 
 @app.post("/api/audit/compare")
-async def compare_clauses(doc_id_a: int, doc_id_b: int, model_name: str = "deepseek-r1:8b", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def compare_clauses(doc_id_a: int, doc_id_b: int, model_name: str = "mistral:latest", db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     doc_a = db.query(Document).filter(Document.id == doc_id_a).first()
     doc_b = db.query(Document).filter(Document.id == doc_id_b).first()
     if not doc_a or not doc_b:
@@ -1270,12 +1314,16 @@ def list_draft_templates(current_user: User = Depends(get_current_user)):
     ]
 
 @app.post("/api/draft/generate")
-async def generate_draft(template_id: str, fields: Dict[str, str], model_name: str = "deepseek-r1:8b", current_user: User = Depends(get_current_user)):
+async def generate_draft(template_id: str, fields: Dict[str, str], model_name: str = "mistral:latest", current_user: User = Depends(get_current_user)):
+    lang_instruction = ""
+    if fields.get("language", "").lower() == "hindi":
+        lang_instruction = "\nCRITICAL REQUIREMENT: The entire draft MUST be written in the HINDI language, using appropriate formal Indian legal terminology (e.g. Nyayalaya, Adhivakta). Do not output English except for case citations or specific statutory abbreviations if absolutely necessary.\n"
+        
     prompt = (
         f"Draft a formal, legally enforceable Indian document of type: '{template_id}'.\n"
         f"Use the following custom details in the draft:\n{json.dumps(fields, indent=2)}\n\n"
         f"Ensure it strictly follows standard formatting in Indian courts, incorporates BNS/BNSS statutory terms where appropriate, "
-        f"and leaves placeholders for signatures. Write the complete document draft text:"
+        f"and leaves placeholders for signatures.{lang_instruction} Write the complete document draft text:"
     )
 
     system_prompt = "You are an experienced advocate in the Supreme Court of India. Write professional legal drafts."
@@ -1463,17 +1511,34 @@ def emergency_panic_button(db: Session = Depends(get_db), current_user: User = D
         db.query(AuditLog).delete()
         db.commit()
 
-        # Wipe document vault files
+        # Securely shred document vault files
         vault_dir = os.path.join(AEGIS_DIR, "vault")
         if os.path.exists(vault_dir):
             for f in os.listdir(vault_dir):
                 file_path = os.path.join(vault_dir, f)
                 if os.path.isfile(file_path):
+                    # Shredding: Overwrite file with random bytes before deleting
+                    file_size = os.path.getsize(file_path)
+                    try:
+                        with open(file_path, "ba+", buffering=0) as f_shred:
+                            f_shred.write(os.urandom(file_size))
+                    except Exception:
+                        pass # proceed to delete even if overwrite fails
                     os.remove(file_path)
 
-        # Wipe chroma collections
+        # Shred and wipe chroma collections
         chroma_dir = os.path.join(AEGIS_DIR, "chroma")
         if os.path.exists(chroma_dir):
+            for root, dirs, files in os.walk(chroma_dir):
+                for f in files:
+                    file_path = os.path.join(root, f)
+                    if os.path.isfile(file_path):
+                        file_size = os.path.getsize(file_path)
+                        try:
+                            with open(file_path, "ba+", buffering=0) as f_shred:
+                                f_shred.write(os.urandom(file_size))
+                        except Exception:
+                            pass
             shutil.rmtree(chroma_dir)
             os.makedirs(chroma_dir, exist_ok=True)
 

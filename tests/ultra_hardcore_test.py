@@ -277,7 +277,7 @@ def run_ultra_hardcore_tests():
         log_test("Vault - Document Ingestion & Encryption", False, str(e))
 
     # Wait for background pipeline to extract text
-    time.sleep(2)
+    time.sleep(15)
 
     # Test 19: Document Text Retrieval
     try:

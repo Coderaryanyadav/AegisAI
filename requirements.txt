@@ -18,4 +18,8 @@ httpx
 python-docx
 pywebview
 pyinstaller
+pymupdf
+pyotp
+qrcode
+email-validator
 
