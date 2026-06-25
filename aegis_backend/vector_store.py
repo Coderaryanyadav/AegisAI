@@ -74,37 +74,13 @@ class LocalBM25Indexer:
         return [{"score": s, "doc": d} for s, d in scores[:limit]]
 
 
-from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
-
-class OfflineHashingEmbeddingFunction(EmbeddingFunction):
-    """
-    A 100% offline, zero-network, zero-dependency embedding function that generates
-    deterministic 384-dimensional semantic-lexical vectors via word hashing.
-    """
-    def __call__(self, input: Documents) -> Embeddings:
-        import hashlib
-        embeddings = []
-        for text in input:
-            vector = [0.0] * 384
-            # Tokenize and hash
-            words = text.lower().split()
-            for word in words:
-                # MD5 hash of the word to index into 384 dimensions
-                h = int(hashlib.md5(word.encode('utf-8')).hexdigest(), 16)
-                idx = h % 384
-                vector[idx] += 1.0
-            # L2 Normalize
-            norm = sum(x*x for x in vector) ** 0.5
-            if norm > 0:
-                vector = [x / norm for x in vector]
-            embeddings.append(vector)
-        return embeddings
+from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
 
 class LocalVectorStore:
     """Manages local embedded ChromaDB vector persistence and hybrid RRF rankings."""
     def __init__(self):
         self.client = chromadb.PersistentClient(path=CHROMA_DIR)
-        self.embedding_function = OfflineHashingEmbeddingFunction()
+        self.embedding_function = ONNXMiniLM_L6_V2()
         try:
             self.collection = self.client.get_or_create_collection(
                 name="aegis_knowledge_base",
@@ -124,6 +100,33 @@ class LocalVectorStore:
                 embedding_function=self.embedding_function
             )
         self._bm25_cache = {}  # Cache structure: { cache_key: (bm25_indexer, candidates_dict) }
+        self._warm_up_bm25_cache()
+
+    def _warm_up_bm25_cache(self):
+        """Pre-populate the full BM25 index in memory to avoid repetitive database reads."""
+        try:
+            all_docs = self.collection.get(include=["documents", "metadatas"])
+            if all_docs and all_docs["ids"]:
+                bm25_corpus = []
+                candidates = {}
+                for idx in range(len(all_docs["ids"])):
+                    doc_id = all_docs["ids"][idx]
+                    text = all_docs["documents"][idx]
+                    meta = all_docs["metadatas"][idx]
+                    bm25_corpus.append({
+                        "id": doc_id,
+                        "text": text,
+                        "metadata": meta
+                    })
+                    candidates[doc_id] = {
+                        "id": doc_id,
+                        "content": text,
+                        "metadata": meta
+                    }
+                self._bm25_cache["all"] = (LocalBM25Indexer(bm25_corpus), candidates)
+        except Exception as e:
+            import logging
+            logging.getLogger("aegis_ai.vector_store").warning(f"Failed to warm up BM25 cache: {e}")
 
     def add_chunks(self, chunks: List[Dict[str, Any]]):
         """
@@ -141,6 +144,7 @@ class LocalVectorStore:
             metadatas=metadatas
         )
         self._bm25_cache.clear()
+        self._warm_up_bm25_cache()
 
     def delete_document_vectors(self, document_id: int):
         """Remove all text chunks matching the document ID."""
@@ -148,6 +152,7 @@ class LocalVectorStore:
             where={"document_id": document_id}
         )
         self._bm25_cache.clear()
+        self._warm_up_bm25_cache()
 
     def query_similarity(self, query: str, limit: int = 10, document_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
         """Pure semantic vector lookup."""
@@ -196,8 +201,23 @@ class LocalVectorStore:
         
         if cache_key in self._bm25_cache:
             bm25_indexer, candidates = self._bm25_cache[cache_key]
+        elif document_ids and "all" in self._bm25_cache:
+            # Optimize: filter the warm "all" index in memory to avoid ChromaDB read latency
+            _, global_candidates = self._bm25_cache["all"]
+            candidates = {}
+            bm25_corpus = []
+            for doc_id, item in global_candidates.items():
+                if item["metadata"].get("document_id") in document_ids:
+                    candidates[doc_id] = item
+                    bm25_corpus.append({
+                        "id": doc_id,
+                        "text": item["content"],
+                        "metadata": item["metadata"]
+                    })
+            bm25_indexer = LocalBM25Indexer(bm25_corpus)
+            self._bm25_cache[cache_key] = (bm25_indexer, candidates)
         else:
-            # Retrieve ALL scoped documents to build the BM25 Lexical Index
+            # Retrieve from database
             all_docs = self.collection.get(
                 where=where_filter,
                 include=["documents", "metadatas"]
@@ -267,3 +287,18 @@ class LocalVectorStore:
             fused_output.append(item)
 
         return fused_output
+
+    def reset_collection(self):
+        """Cleans and re-creates active collection handles after disk wipes."""
+        try:
+            self.client = chromadb.PersistentClient(path=CHROMA_DIR)
+            self.collection = self.client.get_or_create_collection(
+                name="aegis_knowledge_base",
+                metadata={"hnsw:space": "cosine"},
+                embedding_function=self.embedding_function
+            )
+            self._bm25_cache.clear()
+            self._warm_up_bm25_cache()
+        except Exception as e:
+            import logging
+            logging.getLogger("aegis_ai.vector_store").error(f"Error resetting chroma collection: {e}")

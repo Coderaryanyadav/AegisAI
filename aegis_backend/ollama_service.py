@@ -61,7 +61,7 @@ class OllamaService:
                 
                 # 3. Fallback to any model containing common keywords
                 if not matched:
-                    for keyword in ["qwen", "llama", "deepseek", "mistral", "phi"]:
+                    for keyword in ["llama", "mistral", "qwen", "deepseek", "phi"]:
                         for m in available:
                             if keyword in m.lower():
                                 matched = m
@@ -110,7 +110,15 @@ class OllamaService:
                 last_exception = e
                 continue
                 
-        # If all models fail, catch and fall through to offline heuristics
+        # If all models fail, raise error in production or use test fallbacks in test mode
+        test_mode = os.environ.get("AEGIS_TEST_MODE") == "true"
+        if not test_mode:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=503,
+                detail="Local AI inference service (Ollama) is offline or unavailable. Please ensure the Ollama app is running."
+            )
+
         try:
             raise last_exception or RuntimeError("No models available or all models failed.")
         except Exception as e:

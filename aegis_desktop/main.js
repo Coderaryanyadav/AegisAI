@@ -112,7 +112,7 @@ function checkBackend(port, timeoutMs, callback) {
     const req = http.request({
       host: '127.0.0.1',
       port: port,
-      path: '/api/helper/ipc-bns?act=ipc&section=302',
+      path: '/api/health',
       method: 'GET',
       timeout: 500
     }, (res) => {
@@ -132,8 +132,8 @@ function checkBackend(port, timeoutMs, callback) {
   check();
 }
 
-function startBackend() {
-  log('Starting FastAPI backend process...');
+function startBackend(port) {
+  log(`Starting FastAPI backend process on port ${port}...`);
   
   let pythonExecutable = 'python3';
   let pythonArgs = [];
@@ -147,13 +147,14 @@ function startBackend() {
       pythonExecutable = path.join(process.resourcesPath, 'aegis_backend', 'aegis_backend');
     }
     cwd = process.resourcesPath;
+    pythonArgs = ['--port', port.toString()];
   } else {
     const venvBin = process.platform === 'win32' ? 'Scripts' : 'bin';
     const venvPath = path.join(cwd, 'venv', venvBin, process.platform === 'win32' ? 'python.exe' : 'python');
     if (fs.existsSync(venvPath)) {
       pythonExecutable = venvPath;
     }
-    pythonArgs = ['-m', 'aegis_backend.main'];
+    pythonArgs = ['-m', 'aegis_backend.main', '--port', port.toString()];
   }
 
   log(`Spawning backend: ${pythonExecutable} ${pythonArgs.join(' ')}`);
@@ -161,7 +162,7 @@ function startBackend() {
   try {
     backendProcess = spawn(pythonExecutable, pythonArgs, {
       cwd: cwd,
-      env: { ...process.env, PYTHONUNBUFFERED: '1' }
+      env: { ...process.env, PORT: port.toString(), PYTHONUNBUFFERED: '1' }
     });
 
     backendProcess.stdout.on('data', (data) => {
@@ -180,7 +181,7 @@ function startBackend() {
   }
 }
 
-function createWindow() {
+function createWindow(backendPort) {
   mainWindow = new BrowserWindow({
     title: 'AegisAI Offline Legal Suite',
     width: 1366,
@@ -201,12 +202,12 @@ function createWindow() {
   const isDev = !app.isPackaged && process.env.NODE_ENV !== 'production';
   
   if (isDev) {
-    log('Loading local dev server: http://localhost:3000');
-    mainWindow.loadURL('http://localhost:3000');
+    log(`Loading local dev server: http://localhost:3000?backend_port=${backendPort}`);
+    mainWindow.loadURL(`http://localhost:3000?backend_port=${backendPort}`);
     mainWindow.webContents.openDevTools();
   } else {
-    log(`Loading production static build on port ${staticServerPort}`);
-    mainWindow.loadURL(`http://127.0.0.1:${staticServerPort}`);
+    log(`Loading production static build on port ${staticServerPort} with backend port ${backendPort}`);
+    mainWindow.loadURL(`http://127.0.0.1:${staticServerPort}?backend_port=${backendPort}`);
   }
 
   mainWindow.once('ready-to-show', () => {
@@ -219,27 +220,32 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // First, find a free port for static Next.js assets
-  getFreePort(3000, (freePort) => {
-    staticServerPort = freePort;
+  // First, find a free port for FastAPI backend
+  getFreePort(8000, (freeBackendPort) => {
+    const backendPort = freeBackendPort;
     
-    // Start local static server
-    startStaticServer(staticServerPort, (err) => {
-      if (err) {
-        log(`Failed to start static server: ${err.message}`);
-      }
+    // Next, find a free port for static Next.js assets
+    getFreePort(3000, (freeStaticPort) => {
+      staticServerPort = freeStaticPort;
       
-      // Start FastAPI Python backend
-      startBackend();
-
-      // Wait 15 seconds max for Python backend
-      checkBackend(8000, 15000, (backErr) => {
-        if (backErr) {
-          log(`Backend startup check failed: ${backErr.message}`);
-        } else {
-          log('Backend is active on port 8000. Launching UI.');
+      // Start local static server
+      startStaticServer(staticServerPort, (err) => {
+        if (err) {
+          log(`Failed to start static server: ${err.message}`);
         }
-        createWindow();
+        
+        // Start FastAPI Python backend on dynamic port
+        startBackend(backendPort);
+
+        // Wait 15 seconds max for Python backend
+        checkBackend(backendPort, 15000, (backErr) => {
+          if (backErr) {
+            log(`Backend startup check failed on port ${backendPort}: ${backErr.message}`);
+          } else {
+            log(`Backend is active on port ${backendPort}. Launching UI.`);
+          }
+          createWindow(backendPort);
+        });
       });
     });
   });

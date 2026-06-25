@@ -352,6 +352,7 @@ def run_ultra_hardcore_tests():
     try:
         res = client.post("/api/billing/time-entry", headers=headers, json={
             "matter_id": matter_a_id,
+            
             "description": "Cross-examination prep session with technical team",
             "hours": "3.5",
             "rate_per_hour": "12000",

@@ -1,8 +1,8 @@
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, TypeDecorator, event
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import StaticPool, NullPool
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -21,9 +21,8 @@ DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False, "timeout": 30.0},
-    pool_size=100,
-    max_overflow=300
+    connect_args={"check_same_thread": False, "timeout": 60.0},
+    poolclass=NullPool
 )
 
 @event.listens_for(Engine, "connect")
@@ -44,6 +43,10 @@ if not os.path.exists(KEY_PATH):
     new_key = Fernet.generate_key()
     with open(KEY_PATH, "wb") as f:
         f.write(new_key)
+    try:
+        os.chmod(KEY_PATH, 0o600)
+    except Exception:
+        pass
 else:
     with open(KEY_PATH, "rb") as f:
         new_key = f.read()
@@ -78,7 +81,7 @@ class User(Base):
     role = Column(String, default="lawyer", nullable=False) # admin, lawyer, auditor
     firm_logo = Column(Text, nullable=True) # base64 logo string
     firm_name = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
 class Client(Base):
     __tablename__ = "clients"
@@ -87,7 +90,7 @@ class Client(Base):
     email = Column(String, nullable=True)
     phone = Column(String, nullable=True)
     notes = Column(EncryptedText, nullable=True) # Transparently Encrypted Notes
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
     
     matters = relationship("Matter", back_populates="client", cascade="all, delete-orphan")
 
@@ -106,7 +109,7 @@ class Matter(Base):
     cnr_number = Column(String, nullable=True)
     is_locked = Column(Boolean, default=False, nullable=False)
     hmac_signature = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     client = relationship("Client", back_populates="matters")
     schedules = relationship("Schedule", back_populates="matter", cascade="all, delete-orphan")
@@ -133,7 +136,7 @@ class Document(Base):
     file_path = Column(String, nullable=False)
     file_hash = Column(String, index=True, nullable=False)
     status = Column(String, default="uploaded", nullable=False) # uploaded, processing, ocr_needed, processed, failed
-    uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     matter = relationship("Matter", back_populates="documents")
 
@@ -144,7 +147,7 @@ class AuditLog(Base):
     action = Column(String, nullable=False)
     target_type = Column(String, nullable=False)
     target_id = Column(String, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
     details = Column(Text, nullable=True)
 
 class BackupHistory(Base):
@@ -155,7 +158,7 @@ class BackupHistory(Base):
     destination_path = Column(String, nullable=False)
     is_manual = Column(Boolean, default=True, nullable=False)
     status = Column(String, nullable=False) # success, failed, verified
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
     error_message = Column(Text, nullable=True)
 
 class BareActSection(Base):
@@ -176,7 +179,7 @@ class TimeEntry(Base):
     hours = Column(String, nullable=False)       # stored as string decimal
     rate_per_hour = Column(String, nullable=False, default="5000")  # INR
     date = Column(String, nullable=False)        # ISO date string
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 class Invoice(Base):
     __tablename__ = "invoices"
@@ -189,7 +192,7 @@ class Invoice(Base):
     grand_total = Column(String, nullable=False)
     status = Column(String, default="unpaid")        # unpaid, paid, overdue
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 # ====== ANNOTATIONS ======
 class Annotation(Base):
@@ -201,7 +204,7 @@ class Annotation(Base):
     note = Column(Text, nullable=True)
     color = Column(String, default="yellow")   # yellow, green, red, blue
     page_hint = Column(String, nullable=True)  # rough text position hint
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 # ====== 2FA ======
 class TwoFactorSecret(Base):
@@ -211,7 +214,7 @@ class TwoFactorSecret(Base):
     totp_secret = Column(EncryptedText, nullable=False)
     is_enabled = Column(Boolean, default=False)
     recovery_codes = Column(Text, nullable=True)  # JSON list of hashed codes
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 def init_db():
     from sqlalchemy import text
@@ -254,10 +257,21 @@ def init_db():
     db = SessionLocal()
     try:
         # Seed admin
-        admin_exists = db.query(User).filter(User.email == "admin@legalai.local").first()
-        if not admin_exists:
+        admin_exists = db.query(User).filter(User.role == "admin").first()
+        # In production, do not automatically seed admin with default password unless AEGIS_TEST_MODE is true or AEGIS_ADMIN_PASSWORD is set.
+        admin_pw = os.environ.get("AEGIS_ADMIN_PASSWORD")
+        test_mode = os.environ.get("AEGIS_TEST_MODE") == "true"
+        
+        if not admin_exists and (admin_pw or test_mode):
             import bcrypt
-            hashed = bcrypt.hashpw("adminpassword123".encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+            import logging
+            actual_pw = admin_pw or "adminpassword123"
+            if actual_pw == "adminpassword123":
+                logging.getLogger("aegis_ai.backend").warning(
+                    "SECURITY WARNING: Default admin password 'adminpassword123' is being seeded. "
+                    "Please set the 'AEGIS_ADMIN_PASSWORD' environment variable to secure the administrator account."
+                )
+            hashed = bcrypt.hashpw(actual_pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
             default_admin = User(
                 email="admin@legalai.local",
                 hashed_password=hashed,

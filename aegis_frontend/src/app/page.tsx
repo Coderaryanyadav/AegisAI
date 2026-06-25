@@ -10,7 +10,14 @@ import {
   MessageCircle, Settings
 } from "lucide-react";
 
-const API_BASE = "http://localhost:8000";
+let API_BASE = "http://localhost:8000";
+if (typeof window !== "undefined") {
+  const urlParams = new URLSearchParams(window.location.search);
+  const backendPort = urlParams.get("backend_port");
+  if (backendPort) {
+    API_BASE = `http://localhost:${backendPort}`;
+  }
+}
 
 // PDF export helper (jsPDF)
 const exportToPDF = async (title: string, content: string, firmName?: string, logoBase64?: string) => {
@@ -96,6 +103,8 @@ export default function Home() {
   const [role, setRole] = useState("lawyer");
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [twoFactorRequired, setTwoFactorRequired] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
   
   // App Navigation
   const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, crm, research, analyzer, auditor, drafting, backup
@@ -462,6 +471,9 @@ export default function Home() {
       const formData = new URLSearchParams();
       formData.append("username", email);
       formData.append("password", password);
+      if (twoFactorRequired && totpCode) {
+        formData.append("totp_code", totpCode);
+      }
 
       const response = await fetch(`${API_BASE}/api/auth/token`, {
         method: "POST",
@@ -470,15 +482,24 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error("Invalid email or password");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Invalid email or password");
       }
 
       const data = await response.json();
+      if (data.two_factor_required) {
+        setTwoFactorRequired(true);
+        showNotification("Two-factor authentication required. Please enter your TOTP code.", "info");
+        return;
+      }
+
       localStorage.setItem("aegis_token", data.access_token);
       setToken(data.access_token);
       showNotification("Sign in successful!", "success");
       // Clear sensitive fields from UI and load user profile
       setPassword("");
+      setTotpCode("");
+      setTwoFactorRequired(false);
       fetchCurrentUser(data.access_token);
     } catch (err) {
       showNotification(err.message, "error");
@@ -1552,12 +1573,26 @@ export default function Home() {
               </div>
             )}
 
+            {twoFactorRequired && (
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">Two-Factor Authentication Code (TOTP)</label>
+                <input 
+                  type="text" 
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value)}
+                  placeholder="Enter 6-digit code"
+                  className="w-full p-3 rounded-lg glass-input text-zinc-200 text-sm focus:border-zinc-500 font-medium"
+                  required
+                />
+              </div>
+            )}
+
             <button 
               type="submit" 
               className="w-full py-3 bg-white hover:bg-zinc-200 text-black font-semibold rounded-lg text-sm transition-all duration-300 transform active:scale-[0.99] shadow-lg shadow-white/5 cursor-pointer flex items-center justify-center gap-2"
             >
               <Lock className="w-4 h-4" />
-              {isRegisterMode ? "Create Desktop Account" : "Access Security Vault"}
+              {isRegisterMode ? "Create Desktop Account" : twoFactorRequired ? "Verify Code & Enter" : "Access Security Vault"}
             </button>
           </form>
 
@@ -1568,13 +1603,15 @@ export default function Home() {
             >
               {isRegisterMode ? "Already registered? Sign in here" : "Need to initialize first client? Register here"}
             </button>
-            <button 
-              onClick={autofillDemo}
-              className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center justify-center gap-1.5 transition font-medium border border-zinc-900 hover:border-zinc-800/80 bg-zinc-900/30 hover:bg-zinc-900/60 py-2 rounded-lg cursor-pointer animate-pulse-glow"
-            >
-              <Key className="w-3.5 h-3.5" />
-              Autofill Local Demo Account
-            </button>
+            {process.env.NODE_ENV !== "production" && (
+              <button 
+                onClick={autofillDemo}
+                className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center justify-center gap-1.5 transition font-medium border border-zinc-900 hover:border-zinc-800/80 bg-zinc-900/30 hover:bg-zinc-900/60 py-2 rounded-lg cursor-pointer animate-pulse-glow"
+              >
+                <Key className="w-3.5 h-3.5" />
+                Autofill Local Demo Account
+              </button>
+            )}
           </div>
           
           <div className="mt-6 text-center">
