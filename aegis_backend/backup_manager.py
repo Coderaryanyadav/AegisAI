@@ -11,7 +11,7 @@ from datetime import datetime
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from aegis_backend.database import (
-    AEGIS_DIR, DB_PATH, KEY_PATH, SessionLocal, BackupHistory
+    AEGIS_DIR, DB_PATH, KEY_PATH, SessionLocal, BackupHistory, DATABASE_URL
 )
 
 logger = logging.getLogger("aegis_ai.backup_manager")
@@ -68,18 +68,46 @@ class BackupManager:
         backup_path = os.path.join(destination_dir, backup_name)
 
         db = SessionLocal()
+        is_sqlite = DATABASE_URL.startswith("sqlite")
         
         # Temp dir for creating the zip
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
-                # 1. Safely copy the SQLite database using backup API
                 temp_db_path = os.path.join(temp_dir, "aegis_ai.db")
-                src_conn = sqlite3.connect(DB_PATH)
-                dest_conn = sqlite3.connect(temp_db_path)
-                with dest_conn:
-                    src_conn.backup(dest_conn)
-                dest_conn.close()
-                src_conn.close()
+                temp_dump_path = os.path.join(temp_dir, "aegis_ai.dump")
+                
+                if is_sqlite:
+                    # 1. Safely copy the SQLite database using backup API
+                    db_path = DB_PATH
+                    if DATABASE_URL.startswith("sqlite:///"):
+                        db_path = DATABASE_URL.replace("sqlite:///", "")
+                    src_conn = sqlite3.connect(db_path)
+                    dest_conn = sqlite3.connect(temp_db_path)
+                    with dest_conn:
+                        src_conn.backup(dest_conn)
+                    dest_conn.close()
+                    src_conn.close()
+                else:
+                    # 1. PostgreSQL backup using pg_dump
+                    from urllib.parse import urlparse
+                    import subprocess
+                    parsed = urlparse(DATABASE_URL)
+                    env = os.environ.copy()
+                    if parsed.password:
+                        env["PGPASSWORD"] = parsed.password
+                    
+                    cmd = [
+                        "pg_dump",
+                        "-h", parsed.hostname or "localhost",
+                        "-p", str(parsed.port or 5432),
+                        "-U", parsed.username or "postgres",
+                        "-d", parsed.path.lstrip("/"),
+                        "-F", "c",
+                        "-f", temp_dump_path
+                    ]
+                    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+                    if result.returncode != 0:
+                        raise RuntimeError(f"pg_dump failed: {result.stderr or result.stdout}")
 
                 # 2. Paths to package
                 vault_dir = os.path.join(AEGIS_DIR, "vault")
@@ -89,8 +117,11 @@ class BackupManager:
 
                 # Create the ZIP
                 with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    # Add SQLite database
-                    zipf.write(temp_db_path, "aegis_ai.db")
+                    # Add database
+                    if is_sqlite:
+                        zipf.write(temp_db_path, "aegis_ai.db")
+                    else:
+                        zipf.write(temp_dump_path, "aegis_ai.dump")
                     
                     # Add document vault
                     if os.path.exists(vault_dir):
@@ -176,6 +207,7 @@ class BackupManager:
             # Decrypt backup zip file
             zip_data = cls.decrypt_data(encrypted_data)
 
+            is_sqlite = DATABASE_URL.startswith("sqlite")
             # Temp dir to extract contents
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_zip_path = os.path.join(temp_dir, "archive.zip")
@@ -188,17 +220,46 @@ class BackupManager:
 
                 # Validate database exists in archive
                 archived_db_path = os.path.join(temp_dir, "aegis_ai.db")
-                if not os.path.exists(archived_db_path):
-                    raise ValueError("Backup archive does not contain a valid database file.")
+                archived_dump_path = os.path.join(temp_dir, "aegis_ai.dump")
 
-                # Close database connection engine or perform restoration carefully
-                # For safety under desktop setup, we copy the new SQLite DB over the old one.
-                # First delete existing files to prevent active lock clashes
+                if is_sqlite:
+                    if not os.path.exists(archived_db_path):
+                        raise ValueError("Backup archive does not contain a valid SQLite database file.")
+                else:
+                    if not os.path.exists(archived_dump_path):
+                        raise ValueError("Backup archive does not contain a valid PostgreSQL dump file.")
+
+                # Paths to restore to
                 vault_dir = os.path.join(AEGIS_DIR, "vault")
                 chroma_dir = os.path.join(AEGIS_DIR, "chroma")
 
                 # Restore DB file
-                shutil.copy2(archived_db_path, DB_PATH)
+                if is_sqlite:
+                    db_path = DB_PATH
+                    if DATABASE_URL.startswith("sqlite:///"):
+                        db_path = DATABASE_URL.replace("sqlite:///", "")
+                    shutil.copy2(archived_db_path, db_path)
+                else:
+                    from urllib.parse import urlparse
+                    import subprocess
+                    parsed = urlparse(DATABASE_URL)
+                    env = os.environ.copy()
+                    if parsed.password:
+                        env["PGPASSWORD"] = parsed.password
+                    
+                    cmd = [
+                        "pg_restore",
+                        "-h", parsed.hostname or "localhost",
+                        "-p", str(parsed.port or 5432),
+                        "-U", parsed.username or "postgres",
+                        "-d", parsed.path.lstrip("/"),
+                        "-c",
+                        "--if-exists",
+                        archived_dump_path
+                    ]
+                    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+                    if result.returncode not in [0, 1]:  # pg_restore returns 1 on minor warnings, which are safe
+                        raise RuntimeError(f"pg_restore failed: {result.stderr or result.stdout}")
 
                 # Restore Vault
                 archived_vault_dir = os.path.join(temp_dir, "vault")

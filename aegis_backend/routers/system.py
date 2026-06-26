@@ -5,20 +5,20 @@ import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Response
-from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy import text, select, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from aegis_backend.database import get_db, User, Document, Matter, Client, AuditLog, AEGIS_DIR, DB_PATH
 from aegis_backend.core import security
 from aegis_backend.core.security import get_current_user, verify_admin
 from aegis_backend.ollama_service import OllamaService
 
-router = APIRouter(prefix="/api", tags=["system"])
+router = APIRouter(tags=["system"])
 
 @router.get("/health")
-def health_check(db: Session = Depends(get_db)):
+async def health_check(db: AsyncSession = Depends(get_db)):
     try:
-        db.execute(text("SELECT 1"))
+        await db.execute(text("SELECT 1"))
         return {"status": "healthy"}
     except Exception as e:
         raise HTTPException(
@@ -58,20 +58,37 @@ def get_ai_disclaimer():
     }
 
 @router.get("/system/audit-logs")
-def get_compliance_audit_logs(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(verify_admin)):
-    return db.query(AuditLog).order_by(AuditLog.timestamp.desc()).offset(skip).limit(limit).all()
+async def get_compliance_audit_logs(response: Response, skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_admin)):
+    from aegis_backend.core.security import verify_audit_trail_integrity
+    
+    count_stmt = select(func.count(AuditLog.id))
+    count_res = await db.execute(count_stmt)
+    total_count = count_res.scalar()
+    response.headers["X-Total-Count"] = str(total_count)
+    
+    integrity_passed = await verify_audit_trail_integrity(db)
+    response.headers["X-Audit-Log-Integrity"] = "PASSED" if integrity_passed else "FAILED_TAMPERED"
+    
+    stmt = select(AuditLog).order_by(AuditLog.timestamp.desc())
+    res = await db.execute(stmt.offset(skip).limit(limit))
+    return res.scalars().all()
 
 @router.get("/system/audit-logs/export")
-def export_signed_audit_logs(db: Session = Depends(get_db), current_user: User = Depends(verify_admin)):
-    logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).all()
+async def export_signed_audit_logs(db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_admin)):
+    stmt = select(AuditLog).order_by(AuditLog.timestamp.desc())
+    res = await db.execute(stmt)
+    logs = res.scalars().all()
     
     report_lines = []
     report_lines.append("================================================================================")
     report_lines.append("                       AEGIS LEGAL AI COMPLIANCE AUDIT REPORT                   ")
     report_lines.append("================================================================================")
+    from aegis_backend.core.security import verify_audit_trail_integrity
+    integrity_passed = await verify_audit_trail_integrity(db)
     report_lines.append(f"Exported At: {datetime.now(timezone.utc).isoformat()} UTC")
     report_lines.append(f"Exported By: {current_user.email}")
     report_lines.append(f"System Directory: {AEGIS_DIR}")
+    report_lines.append(f"Integrity Chain: {'VERIFIED/SECURE' if integrity_passed else 'WARNING: TAMPERING DETECTED'}")
     report_lines.append("--------------------------------------------------------------------------------")
     report_lines.append(f"{'TIMESTAMP (UTC)':<20} | {'USER EMAIL':<30} | {'ACTION':<15} | {'TARGET':<10} | DETAILS")
     report_lines.append("--------------------------------------------------------------------------------")
@@ -90,14 +107,9 @@ def export_signed_audit_logs(db: Session = Depends(get_db), current_user: User =
     
     report_content = "\n".join(report_lines)
     
-    key_path = os.path.join(AEGIS_DIR, ".master.key")
-    try:
-        with open(key_path, "rb") as f:
-            master_key = f.read()
-    except Exception:
-        master_key = b"fallback-aegis-key-hash"
-        
-    signature = hmac.new(master_key, report_content.encode("utf-8"), hashlib.sha256).hexdigest()
+    from aegis_backend.database import master_key
+    master_key_bytes = master_key.encode("utf-8") if isinstance(master_key, str) else master_key
+    signature = hmac.new(master_key_bytes, report_content.encode("utf-8"), hashlib.sha256).hexdigest()
     signed_document = f"{report_content}\n\n[CRYPTOGRAPHIC INTEGRITY SIGNATURE]\nHMAC-SHA256: {signature}\n"
     
     return Response(
@@ -114,13 +126,18 @@ async def list_ollama_models(current_user: User = Depends(get_current_user)):
     return {"models": models}
 
 @router.get("/system/status")
-async def system_diagnostics(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def system_diagnostics(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     models = await OllamaService.get_available_models()
     ollama_running = len(models) > 0
 
-    doc_count = db.query(Document).count()
-    matter_count = db.query(Matter).count()
-    client_count = db.query(Client).count()
+    doc_res = await db.execute(select(func.count(Document.id)))
+    doc_count = doc_res.scalar()
+    
+    matter_res = await db.execute(select(func.count(Matter.id)))
+    matter_count = matter_res.scalar()
+    
+    client_res = await db.execute(select(func.count(Client.id)))
+    client_count = client_res.scalar()
 
     db_size = 0
     if os.path.exists(DB_PATH):
@@ -136,16 +153,21 @@ async def system_diagnostics(db: Session = Depends(get_db), current_user: User =
     }
 
 @router.get("/system/upcoming-hearings")
-def get_upcoming_hearings(hours: int = 48, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def get_upcoming_hearings(hours: int = 48, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     from aegis_backend.database import Schedule
     now = datetime.now(timezone.utc).isoformat()
     cutoff = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
-    schedules = db.query(Schedule).filter(
+    
+    stmt = select(Schedule).filter(
         Schedule.is_completed == False,
         Schedule.target_date >= now,
         Schedule.target_date <= cutoff
-    ).order_by(Schedule.target_date).all()
+    ).order_by(Schedule.target_date)
+    
+    res = await db.execute(stmt)
+    schedules = res.scalars().all()
     return [
         {"id": s.id, "title": s.title, "schedule_type": s.schedule_type, "target_date": s.target_date}
         for s in schedules
     ]
+

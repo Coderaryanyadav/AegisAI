@@ -82,7 +82,7 @@ class LocalVectorStore:
         self.client = chromadb.PersistentClient(path=CHROMA_DIR)
         self.embedding_function = ONNXMiniLM_L6_V2()
         try:
-            self.collection = self.client.get_or_create_collection(
+            self._collection = self.client.get_or_create_collection(
                 name="aegis_knowledge_base",
                 metadata={"hnsw:space": "cosine"},
                 embedding_function=self.embedding_function
@@ -94,25 +94,61 @@ class LocalVectorStore:
                 self.client.delete_collection("aegis_knowledge_base")
             except Exception:
                 pass
-            self.collection = self.client.get_or_create_collection(
+            self._collection = self.client.get_or_create_collection(
                 name="aegis_knowledge_base",
                 metadata={"hnsw:space": "cosine"},
                 embedding_function=self.embedding_function
             )
         self._bm25_cache = {}  # Cache structure: { cache_key: (bm25_indexer, candidates_dict) }
+
+    @property
+    def collection(self):
+        try:
+            if hasattr(self, '_collection'):
+                # Try a quick metadata get to verify the collection handle is still valid
+                self._collection.get(limit=1)
+                return self._collection
+        except Exception:
+            pass
+
+        # Re-fetch or re-create the collection if it was wiped or deleted from database metadata
+        try:
+            self._collection = self.client.get_or_create_collection(
+                name="aegis_knowledge_base",
+                metadata={"hnsw:space": "cosine"},
+                embedding_function=self.embedding_function
+            )
+        except Exception:
+            self.client = chromadb.PersistentClient(path=CHROMA_DIR)
+            self._collection = self.client.get_or_create_collection(
+                name="aegis_knowledge_base",
+                metadata={"hnsw:space": "cosine"},
+                embedding_function=self.embedding_function
+            )
         self._warm_up_bm25_cache()
+        return self._collection
 
     def _warm_up_bm25_cache(self):
-        """Pre-populate the full BM25 index in memory to avoid repetitive database reads."""
+        """Pre-populate the full BM25 index in memory using paginated batches to prevent memory exhaustion."""
         try:
-            all_docs = self.collection.get(include=["documents", "metadatas"])
-            if all_docs and all_docs["ids"]:
-                bm25_corpus = []
-                candidates = {}
-                for idx in range(len(all_docs["ids"])):
-                    doc_id = all_docs["ids"][idx]
-                    text = all_docs["documents"][idx]
-                    meta = all_docs["metadatas"][idx]
+            bm25_corpus = []
+            candidates = {}
+            limit = 5000
+            offset = 0
+            
+            while True:
+                page = self.collection.get(
+                    include=["documents", "metadatas"],
+                    limit=limit,
+                    offset=offset
+                )
+                if not page or not page["ids"]:
+                    break
+                
+                for idx in range(len(page["ids"])):
+                    doc_id = page["ids"][idx]
+                    text = page["documents"][idx]
+                    meta = page["metadatas"][idx]
                     bm25_corpus.append({
                         "id": doc_id,
                         "text": text,
@@ -123,6 +159,12 @@ class LocalVectorStore:
                         "content": text,
                         "metadata": meta
                     }
+                
+                if len(page["ids"]) < limit:
+                    break
+                offset += limit
+
+            if bm25_corpus:
                 self._bm25_cache["all"] = (LocalBM25Indexer(bm25_corpus), candidates)
         except Exception as e:
             import logging
@@ -292,7 +334,7 @@ class LocalVectorStore:
         """Cleans and re-creates active collection handles after disk wipes."""
         try:
             self.client = chromadb.PersistentClient(path=CHROMA_DIR)
-            self.collection = self.client.get_or_create_collection(
+            self._collection = self.client.get_or_create_collection(
                 name="aegis_knowledge_base",
                 metadata={"hnsw:space": "cosine"},
                 embedding_function=self.embedding_function
@@ -302,3 +344,6 @@ class LocalVectorStore:
         except Exception as e:
             import logging
             logging.getLogger("aegis_ai.vector_store").error(f"Error resetting chroma collection: {e}")
+
+# Shared vector store singleton instance
+vector_store = LocalVectorStore()

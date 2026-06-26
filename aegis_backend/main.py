@@ -20,17 +20,24 @@ from aegis_backend.database import init_db, AEGIS_DIR
 from aegis_backend.backup_manager import run_backup_scheduler
 from aegis_backend.ollama_service import OllamaService
 
-# Setup loggers
-logging.basicConfig(level=logging.INFO)
+# Setup structured JSON logging
+from pythonjsonlogger import jsonlogger
+log_handler = logging.StreamHandler()
+formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
+log_handler.setFormatter(formatter)
+logging.basicConfig(level=logging.INFO, handlers=[log_handler], force=True)
 logger = logging.getLogger("aegis_ai.backend")
 
 # Initialize database schemas
 init_db()
 
+ollama_process = None
+
 async def ensure_ollama_runtime():
     """Starts local Ollama daemon if offline and pre-pulls reasoning models."""
     import subprocess
     import shutil
+    global ollama_process
     
     # 1. Check if Ollama is running
     is_running = await OllamaService.is_ollama_running()
@@ -49,13 +56,13 @@ async def ensure_ollama_runtime():
                     win_path = os.path.join(local_app_data, "Programs", "Ollama", "ollama.exe")
                     if os.path.exists(win_path):
                         ollama_path = win_path
-
+ 
             if ollama_path:
                 logger.info(f"Spawning background Ollama daemon programmatically: {ollama_path} serve")
-                subprocess.Popen([ollama_path, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                ollama_process = subprocess.Popen([ollama_path, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
                 logger.info("Ollama binary not found in common locations. Attempting standard command execute...")
-                subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                ollama_process = subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             logger.error(f"Failed to start Ollama daemon automatically: {e}")
 
@@ -111,28 +118,81 @@ async def lifespan(app: FastAPI):
     logger.info("AegisAI backend shutting down. Cleaning up background tasks...")
     backup_task.cancel()
     ollama_task.cancel()
+    
+    # Close HTTP connection pool
+    try:
+        from aegis_backend.core.http_client import close_http_client
+        await close_http_client()
+        logger.info("Shared HTTP client connection pool closed.")
+    except Exception as e:
+        logger.warning(f"Error closing HTTP client pool: {e}")
+
     try:
         await asyncio.gather(backup_task, ollama_task, return_exceptions=True)
     except Exception as e:
         logger.warning(f"Error during lifespan shutdown cleanup: {e}")
 
+    # Clean up programmatically started Ollama process
+    global ollama_process
+    if ollama_process:
+        logger.info("Terminating programmatically spawned Ollama subprocess...")
+        try:
+            ollama_process.terminate()
+            for _ in range(5):
+                if ollama_process.poll() is not None:
+                    break
+                await asyncio.sleep(1.0)
+            if ollama_process.poll() is None:
+                logger.warning("Ollama process did not terminate. Killing process...")
+                ollama_process.kill()
+                ollama_process.wait()
+            logger.info("Ollama subprocess cleaned up successfully.")
+        except Exception as e:
+            logger.error(f"Failed to clean up Ollama subprocess: {e}")
+
+test_mode = os.environ.get("AEGIS_TEST_MODE") == "true"
 app = FastAPI(
     title="AegisAI Offline Legal Suite",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None
+    docs_url="/docs" if test_mode else None,
+    redoc_url="/redoc" if test_mode else None,
+    openapi_url="/openapi.json" if test_mode else None
 )
 
-# Allow CORS strictly for local Electron/Next.js frontend
+# Allow CORS dynamically from environment, defaulting to local Electron/Next.js frontend
+cors_origins_env = os.environ.get("AEGIS_CORS_ORIGINS")
+if cors_origins_env:
+    origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+else:
+    origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data:; "
+        "img-src 'self' data: blob:;"
+    )
+    return response
+
 
 # Import and register routers
 from aegis_backend.routers.auth import router as auth_router
@@ -147,17 +207,12 @@ from aegis_backend.routers.system import router as system_router
 from aegis_backend.routers.analytics import router as analytics_router
 from aegis_backend.routers.annotations import router as annotations_router
 
-app.include_router(auth_router)
-app.include_router(clients_router)
-app.include_router(matters_router)
-app.include_router(schedules_router)
-app.include_router(documents_router)
-app.include_router(research_router)
-app.include_router(billing_router)
-app.include_router(backup_router)
-app.include_router(system_router)
-app.include_router(analytics_router)
-app.include_router(annotations_router)
+for r in [
+    auth_router, clients_router, matters_router, schedules_router,
+    documents_router, research_router, billing_router, backup_router,
+    system_router, analytics_router, annotations_router
+]:
+    app.include_router(r, prefix="/api")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

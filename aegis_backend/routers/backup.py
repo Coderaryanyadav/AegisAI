@@ -2,19 +2,21 @@ import os
 import shutil
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete
 
 from aegis_backend.database import get_db, User, BackupHistory, Document, Schedule, Matter, Client, AuditLog, AEGIS_DIR
 from aegis_backend.core.security import get_current_user, verify_admin, log_audit_trail
 from aegis_backend.backup_manager import BackupManager
-from aegis_backend.vector_store import LocalVectorStore
+from aegis_backend.vector_store import vector_store
 
-router = APIRouter(prefix="/api", tags=["backup"])
-vector_store = LocalVectorStore()
+router = APIRouter(tags=["backup"])
 
 @router.get("/backup/history")
-def get_backup_runs(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(verify_admin)):
-    return db.query(BackupHistory).order_by(BackupHistory.created_at.desc()).offset(skip).limit(limit).all()
+async def get_backup_runs(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_admin)):
+    stmt = select(BackupHistory).order_by(BackupHistory.created_at.desc()).offset(skip).limit(limit)
+    res = await db.execute(stmt)
+    return res.scalars().all()
 
 @router.post("/backup/create")
 def trigger_manual_backup(current_user: User = Depends(verify_admin)):
@@ -27,10 +29,9 @@ def trigger_manual_backup(current_user: User = Depends(verify_admin)):
 @router.post("/backup/restore")
 def trigger_restore(backup_path: str, current_user: User = Depends(verify_admin)):
     try:
-        if not os.path.isabs(backup_path):
-            candidate = os.path.abspath(os.path.join(AEGIS_DIR, "backups", backup_path))
-        else:
-            candidate = os.path.abspath(backup_path)
+        # Extract filename only to eliminate any directory traversal vulnerability
+        safe_filename = os.path.basename(backup_path)
+        candidate = os.path.abspath(os.path.join(AEGIS_DIR, "backups", safe_filename))
 
         backups_dir = os.path.abspath(os.path.join(AEGIS_DIR, "backups"))
         if not os.path.commonpath([candidate, backups_dir]) == backups_dir:
@@ -44,22 +45,23 @@ def trigger_restore(backup_path: str, current_user: User = Depends(verify_admin)
         raise HTTPException(status_code=500, detail=f"Restoration failed: {e}")
 
 @router.post("/backup/panic", status_code=200)
-def emergency_panic_button(db: Session = Depends(get_db), current_user: User = Depends(verify_admin)):
+async def emergency_panic_button(db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_admin)):
     import logging
     logger = logging.getLogger("aegis_ai.backend")
     logger.warning("PANIC SIGNAL INITIATED: Wiping active workspace contents.")
     try:
         # Create emergency recovery point
-        emergency_backup_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+        emergency_backup_dir = os.path.join(AEGIS_DIR, "emergency")
+        os.makedirs(emergency_backup_dir, exist_ok=True)
         backup_path = BackupManager.create_backup(destination_dir=emergency_backup_dir, is_manual=True)
         
         # WIPE DB tables containing client secrets
-        db.query(Document).delete()
-        db.query(Schedule).delete()
-        db.query(Matter).delete()
-        db.query(Client).delete()
-        db.query(AuditLog).delete()
-        db.commit()
+        await db.execute(delete(Document))
+        await db.execute(delete(Schedule))
+        await db.execute(delete(Matter))
+        await db.execute(delete(Client))
+        await db.execute(delete(AuditLog))
+        await db.commit()
 
         # Securely shred document vault files
         vault_dir = os.path.join(AEGIS_DIR, "vault")
@@ -102,7 +104,8 @@ def emergency_panic_button(db: Session = Depends(get_db), current_user: User = D
     except Exception as e:
         logger.error(f"Panic recovery routine failed: {e}")
         try:
-            db.rollback()
+            await db.rollback()
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"Panic wipe routine encountered error: {e}")
+

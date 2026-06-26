@@ -5,33 +5,69 @@ import shutil
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from sqlalchemy.orm import Session
+from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
-from aegis_backend.database import get_db, User, Matter, Document, Schedule, BareActSection
+from aegis_backend.database import get_db, User, Matter, Document, Schedule, BareActSection, Client
 from aegis_backend.schemas.models import (
     ResearchQuery, ConflictCheckRequest, FormatDraftRequest, SimplifyClauseRequest,
     FIRAnalysisRequest, PredictOutcomeRequest, VoiceTranscribeRequest
 )
 from aegis_backend.core.security import (
     get_current_user, verify_lawyer_or_admin, log_audit_trail,
-    read_decrypted_document_text, AEGIS_DIR
+    read_decrypted_document_text, AEGIS_DIR, check_prompt_injection, safe_db_rollback
 )
-from aegis_backend.vector_store import LocalVectorStore
+from aegis_backend.vector_store import vector_store
 from aegis_backend.ollama_service import OllamaService
 from aegis_backend.indian_legal_helper import IndianLegalHelper
 from aegis_backend.document_processor import DocumentProcessor
 
-router = APIRouter(prefix="/api", tags=["research"])
-vector_store = LocalVectorStore()
+from aegis_backend.core.cache import rag_cache
+
+router = APIRouter(tags=["research"])
+
+
 
 @router.post("/research/query")
-async def query_legal_rag(req: ResearchQuery, db: Session = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+async def query_legal_rag(req: ResearchQuery, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+    # 1. Prompt Injection Filter
+    if check_prompt_injection(req.query):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Potential prompt injection or instruction override attempt detected. Request blocked."
+        )
+
+    # 2. Cache Lookup
+    sorted_ids = sorted(req.matter_ids or [])
+    cache_key = f"{current_user.email}:{req.model_name}:{json.dumps(sorted_ids)}:{req.query}"
+    cached = rag_cache.get(cache_key)
+    if cached:
+        await log_audit_trail(db, current_user.email, "LEGAL_SEARCH_CACHED", "rag", details=req.query)
+        return cached
+
     chunks = vector_store.query_hybrid(req.query, limit=5, document_ids=req.matter_ids)
+    safe_chunks = [c for c in chunks if not check_prompt_injection(c["content"])]
 
     context = ""
-    for idx, c in enumerate(chunks):
+    total_words = 0
+    max_words = 6000  # Safe context buffer for local models (approx 8000 tokens)
+    for idx, c in enumerate(safe_chunks):
         filename = c["metadata"].get("filename", "Unknown Document")
-        context += f"[Context {idx+1}] File: {filename}\nContent:\n{c['content']}\n\n"
+        chunk_content = c["content"]
+        chunk_words = len(chunk_content.split())
+        
+        if total_words + chunk_words > max_words:
+            allowed_words = max_words - total_words
+            if allowed_words <= 0:
+                break
+            words = chunk_content.split()
+            chunk_content = " ".join(words[:allowed_words]) + " [Content truncated to fit local LLM context limits]"
+            total_words += allowed_words
+        else:
+            total_words += chunk_words
+            
+        context += f"[Context {idx+1}] File: {filename}\nContent:\n{chunk_content}\n\n"
 
     system_prompt = (
         "You are AegisAI, an expert Indian legal assistant. "
@@ -53,16 +89,102 @@ async def query_legal_rag(req: ResearchQuery, db: Session = Depends(get_db), cur
         system_prompt=system_prompt
     )
 
-    log_audit_trail(db, current_user.email, "LEGAL_SEARCH", "rag", details=req.query)
+    await log_audit_trail(db, current_user.email, "LEGAL_SEARCH", "rag", details=req.query)
 
-    return {
+    result = {
         "response": response,
         "sources": [{"id": c["id"], "text": c["content"], "metadata": c["metadata"]} for c in chunks],
         "disclaimer": "AI-generated content is for informational purposes only. It is not professional legal advice and must be independently verified by an advocate."
     }
+    
+    rag_cache.set(cache_key, result)
+    return result
+
+@router.post("/research/query/stream")
+async def query_legal_rag_stream(
+    req: ResearchQuery,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(verify_lawyer_or_admin)
+):
+    if check_prompt_injection(req.query):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Potential prompt injection or instruction override attempt detected. Request blocked."
+        )
+
+    sorted_ids = sorted(req.matter_ids or [])
+    cache_key = f"{current_user.email}:{req.model_name}:{json.dumps(sorted_ids)}:{req.query}"
+    cached = rag_cache.get(cache_key)
+
+    async def sse_generator():
+        if cached:
+            await log_audit_trail(db, current_user.email, "LEGAL_SEARCH_CACHED", "rag", details=req.query)
+            yield f"data: {json.dumps(cached)}\n\n"
+            return
+
+        chunks = vector_store.query_hybrid(req.query, limit=5, document_ids=req.matter_ids)
+        safe_chunks = [c for c in chunks if not check_prompt_injection(c["content"])]
+
+        context = ""
+        total_words = 0
+        max_words = 6000  # Safe context buffer for local models (approx 8000 tokens)
+        for idx, c in enumerate(safe_chunks):
+            filename = c["metadata"].get("filename", "Unknown Document")
+            chunk_content = c["content"]
+            chunk_words = len(chunk_content.split())
+            
+            if total_words + chunk_words > max_words:
+                allowed_words = max_words - total_words
+                if allowed_words <= 0:
+                    break
+                words = chunk_content.split()
+                chunk_content = " ".join(words[:allowed_words]) + " [Content truncated to fit local LLM context limits]"
+                total_words += allowed_words
+            else:
+                total_words += chunk_words
+                
+            context += f"[Context {idx+1}] File: {filename}\nContent:\n{chunk_content}\n\n"
+
+        system_prompt = (
+            "You are AegisAI, an expert Indian legal assistant. "
+            "Answer the user's questions truthfully and accurately using the context provided. "
+            "Always cite the document name or section numbers clearly. "
+            "Provide professional analysis, citations, ratios, or statutory converted references where relevant. "
+            "If you do not know, state that you do not know based on local context."
+        )
+
+        prompt = (
+            f"Context Details:\n{context}\n"
+            f"Query: {req.query}\n"
+            f"Provide your professional legal response with references:"
+        )
+
+        full_response_parts = []
+        async for chunk in OllamaService.generate_completion_stream(
+            model=req.model_name,
+            prompt=prompt,
+            system_prompt=system_prompt
+        ):
+            full_response_parts.append(chunk)
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+
+        full_text = "".join(full_response_parts)
+        result_data = {
+            "response": full_text,
+            "sources": [{"id": c["id"], "text": c["content"], "metadata": c["metadata"]} for c in safe_chunks],
+            "disclaimer": "AI-generated content is for informational purposes only. It is not professional legal advice and must be independently verified by an advocate."
+        }
+
+        if full_text:
+            rag_cache.set(cache_key, result_data)
+
+        await log_audit_trail(db, current_user.email, "LEGAL_SEARCH", "rag", details=req.query)
+        yield f"data: {json.dumps(result_data)}\n\n"
+
+    return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
 @router.get("/helper/ipc-bns")
-def get_statutory_mapping(act: str, section: str, db: Session = Depends(get_db)):
+async def get_statutory_mapping(act: str, section: str, db: AsyncSession = Depends(get_db)):
     mapping = IndianLegalHelper.convert_section(act, section)
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found for the requested section.")
@@ -72,10 +194,12 @@ def get_statutory_mapping(act: str, section: str, db: Session = Depends(get_db))
     
     full_text = None
     if new_section and target_act:
-        sect_data = db.query(BareActSection).filter(
+        stmt = select(BareActSection).filter(
             BareActSection.act == target_act,
             BareActSection.section == new_section
-        ).first()
+        )
+        res = await db.execute(stmt)
+        sect_data = res.scalars().first()
         if sect_data:
             full_text = sect_data.content
             
@@ -90,9 +214,9 @@ def normalize_citation(citation: str = Form(...)):
     return {"original": citation, "normalized": normalized}
 
 @router.post("/analyze/cause-list")
-def parse_cause_list(
+async def parse_cause_list(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(verify_lawyer_or_admin)
 ):
     import fitz # PyMuPDF
@@ -117,7 +241,9 @@ def parse_cause_list(
     if os.path.exists(temp_pdf_path):
         os.remove(temp_pdf_path)
 
-    matters = db.query(Matter).all()
+    stmt_matters = select(Matter)
+    res_matters = await db.execute(stmt_matters)
+    matters = res_matters.scalars().all()
     matches = []
     
     for matter in matters:
@@ -131,11 +257,13 @@ def parse_cause_list(
         if simple_pattern and simple_pattern in simple_text:
             target_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
             
-            existing = db.query(Schedule).filter(
+            stmt_sched = select(Schedule).filter(
                 Schedule.matter_id == matter.id,
                 Schedule.title == f"Automatic Cause List Hearing: {matter.case_number}",
                 Schedule.target_date == target_date
-            ).first()
+            )
+            res_sched = await db.execute(stmt_sched)
+            existing = res_sched.scalars().first()
             
             if not existing:
                 schedule = Schedule(
@@ -146,8 +274,8 @@ def parse_cause_list(
                     notes=f"Auto-extracted match in uploaded daily court Cause List PDF: '{file.filename}'."
                 )
                 db.add(schedule)
-                db.commit()
-                db.refresh(schedule)
+                await db.commit()
+                await db.refresh(schedule)
                 matches.append({
                     "matter_id": matter.id,
                     "case_number": matter.case_number,
@@ -165,7 +293,7 @@ def parse_cause_list(
                     "already_scheduled": True
                 })
                 
-    log_audit_trail(db, current_user.email, "PARSE_CAUSE_LIST", "cause_list", details=f"Scanned {file.filename}, found {len(matches)} matches.")
+    await log_audit_trail(db, current_user.email, "PARSE_CAUSE_LIST", "cause_list", details=f"Scanned {file.filename}, found {len(matches)} matches.")
     
     return {
         "filename": file.filename,
@@ -174,8 +302,10 @@ def parse_cause_list(
     }
 
 @router.post("/analyze/extract-timeline")
-async def extract_case_timeline(document_id: int, model_name: str = "mistral:latest", db: Session = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
-    doc = db.query(Document).filter(Document.id == document_id).first()
+async def extract_case_timeline(document_id: int, model_name: str = "mistral:latest", db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+    stmt = select(Document).filter(Document.id == document_id)
+    res = await db.execute(stmt)
+    doc = res.scalars().first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -208,8 +338,10 @@ async def extract_case_timeline(document_id: int, model_name: str = "mistral:lat
     }
 
 @router.post("/analyze/facts")
-async def extract_case_facts(document_id: int, model_name: str = "mistral:latest", db: Session = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
-    doc = db.query(Document).filter(Document.id == document_id).first()
+async def extract_case_facts(document_id: int, model_name: str = "mistral:latest", db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+    stmt = select(Document).filter(Document.id == document_id)
+    res = await db.execute(stmt)
+    doc = res.scalars().first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -243,8 +375,10 @@ async def extract_case_facts(document_id: int, model_name: str = "mistral:latest
     }
 
 @router.post("/audit/risk-scan")
-async def scan_contract_risks(document_id: int, model_name: str = "mistral:latest", db: Session = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
-    doc = db.query(Document).filter(Document.id == document_id).first()
+async def scan_contract_risks(document_id: int, model_name: str = "mistral:latest", db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+    stmt = select(Document).filter(Document.id == document_id)
+    res = await db.execute(stmt)
+    doc = res.scalars().first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -277,9 +411,14 @@ async def scan_contract_risks(document_id: int, model_name: str = "mistral:lates
     }
 
 @router.post("/audit/compare")
-async def compare_clauses(doc_id_a: int, doc_id_b: int, model_name: str = "mistral:latest", db: Session = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
-    doc_a = db.query(Document).filter(Document.id == doc_id_a).first()
-    doc_b = db.query(Document).filter(Document.id == doc_id_b).first()
+async def compare_clauses(doc_id_a: int, doc_id_b: int, model_name: str = "mistral:latest", db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+    stmt_a = select(Document).filter(Document.id == doc_id_a)
+    res_a = await db.execute(stmt_a)
+    doc_a = res_a.scalars().first()
+    
+    stmt_b = select(Document).filter(Document.id == doc_id_b)
+    res_b = await db.execute(stmt_b)
+    doc_b = res_b.scalars().first()
     if not doc_a or not doc_b:
         raise HTTPException(status_code=404, detail="One or both documents not found")
 
@@ -315,6 +454,12 @@ async def compare_clauses(doc_id_a: int, doc_id_b: int, model_name: str = "mistr
 
 @router.post("/audit/simplify")
 async def simplify_clause_endpoint(req: SimplifyClauseRequest, current_user: User = Depends(verify_lawyer_or_admin)):
+    if check_prompt_injection(req.clause_text):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Potential prompt injection or instruction override attempt detected. Request blocked."
+        )
+
     prompt = (
         "Translate the following complex legal clause into clear, plain English. "
         "Also extract the key rights it grants, and the critical liabilities or risks it imposes.\n\n"
@@ -362,6 +507,13 @@ def list_draft_templates(current_user: User = Depends(get_current_user)):
 
 @router.post("/draft/generate")
 async def generate_draft(template_id: str, fields: Dict[str, str], model_name: str = "mistral:latest", current_user: User = Depends(verify_lawyer_or_admin)):
+    for k, v in fields.items():
+        if check_prompt_injection(v):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Potential prompt injection or instruction override attempt detected in field '{k}'. Request blocked."
+            )
+
     lang_instruction = ""
     if fields.get("language", "").lower() == "hindi":
         lang_instruction = "\nCRITICAL REQUIREMENT: The entire draft MUST be written in the HINDI language, using appropriate formal Indian legal terminology (e.g. Nyayalaya, Adhivakta). Do not output English except for case citations or specific statutory abbreviations if absolutely necessary.\n"
@@ -438,10 +590,12 @@ def format_legal_draft(req: FormatDraftRequest, current_user: User = Depends(ver
     return {"formatted_draft": final_text}
 
 @router.post("/analyze/fir")
-async def analyze_fir_documents(req: FIRAnalysisRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def analyze_fir_documents(req: FIRAnalysisRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     combined_text = ""
     for doc_id in req.document_ids[:5]:
-        doc = db.query(Document).filter(Document.id == doc_id).first()
+        stmt = select(Document).filter(Document.id == doc_id)
+        res = await db.execute(stmt)
+        doc = res.scalars().first()
         if doc and os.path.exists(doc.file_path):
             filename = os.path.basename(doc.file_path)
             txt_path = os.path.join(AEGIS_DIR, "vault", filename + ".txt")
@@ -484,14 +638,20 @@ Return ONLY valid JSON."""
             user_prompt=f"Analyze these criminal case documents:\n{combined_text[:6000]}",
             schema_hint="{\"case_overview\":\"\", \"fir_timeline\":[], \"contradictions\":[], \"defense_points\":[], \"missing_evidence\":[], \"applicable_sections_bns\":[]}"
         )
-        log_audit_trail(db, current_user.email, "FIR_ANALYZE", "documents", str(req.document_ids))
+        await log_audit_trail(db, current_user.email, "FIR_ANALYZE", "documents", str(req.document_ids))
         return result
     except Exception as e:
-        _safe_db_rollback(db)
+        await safe_db_rollback(db)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/analyze/predict-outcome")
 async def predict_case_outcome(req: PredictOutcomeRequest, current_user: User = Depends(get_current_user)):
+    if check_prompt_injection(req.facts) or check_prompt_injection(req.sections) or check_prompt_injection(req.court):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Potential prompt injection or instruction override attempt detected in inputs. Request blocked."
+        )
+
     system_prompt = """You are an expert Indian judicial analyst with 30+ years of Supreme Court and High Court experience. Based on the case facts, court type, and applicable legal sections provided, return a JSON object with:
 - 'predicted_outcome': one of Likely to Succeed / Uncertain / Likely to Fail
 - 'confidence_percentage': integer 0-100
@@ -517,8 +677,12 @@ Return ONLY valid JSON."""
 
 @router.post("/analyze/transcribe")
 async def transcribe_audio(req: VoiceTranscribeRequest, current_user: User = Depends(get_current_user)):
-    import base64, tempfile, subprocess
+    import base64, tempfile, subprocess, re
     try:
+        # Sanitize language code to prevent command/argument injection
+        if not re.match(r"^[a-zA-Z-]{2,10}$", req.language):
+            raise HTTPException(status_code=400, detail="Invalid language identifier format.")
+
         audio_bytes = base64.b64decode(req.audio_base64)
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(audio_bytes)
@@ -551,12 +715,22 @@ async def transcribe_audio(req: VoiceTranscribeRequest, current_user: User = Dep
             pass
 
 @router.get("/whatsapp/reminder/{schedule_id}")
-def generate_whatsapp_reminder(schedule_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    schedule = db.query(Schedule).filter(Schedule.id == schedule_id).first()
+async def generate_whatsapp_reminder(schedule_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    stmt_sched = select(Schedule).filter(Schedule.id == schedule_id)
+    res_sched = await db.execute(stmt_sched)
+    schedule = res_sched.scalars().first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
-    matter = db.query(Matter).filter(Matter.id == schedule.matter_id).first()
-    client = db.query(Client).filter(Client.id == matter.client_id).first() if matter else None
+    
+    stmt_matter = select(Matter).filter(Matter.id == schedule.matter_id)
+    res_matter = await db.execute(stmt_matter)
+    matter = res_matter.scalars().first()
+    
+    client = None
+    if matter:
+        stmt_client = select(Client).filter(Client.id == matter.client_id)
+        res_client = await db.execute(stmt_client)
+        client = res_client.scalars().first()
     
     date_str = schedule.target_date[:10] if schedule.target_date else "TBD"
     time_str = schedule.target_date[11:16] if len(schedule.target_date) > 10 else ""
@@ -565,4 +739,10 @@ def generate_whatsapp_reminder(schedule_id: int, db: Session = Depends(get_db), 
     
     import urllib.parse
     whatsapp_url = f"https://wa.me/?text={urllib.parse.quote(message)}"
-    return {"message": message, "whatsapp_url": whatsapp_url, "phone": client.phone if client else ""}
+    return {
+        "message": message,
+        "whatsapp_url": whatsapp_url,
+        "phone": client.phone if client else "",
+        "disclaimer": "WARNING: Clicking this link sends client and case details outside the local AegisAI system to WhatsApp (Meta) servers, violating the offline privacy boundary. Proceed with caution."
+    }
+

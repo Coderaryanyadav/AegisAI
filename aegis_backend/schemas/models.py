@@ -1,11 +1,27 @@
-from pydantic import BaseModel, EmailStr
-from typing import List, Optional, Dict
-from datetime import datetime
+import re
+from typing import List, Optional, Dict, Literal
+from datetime import date, datetime
+from pydantic import BaseModel, EmailStr, field_validator, Field
 
 class UserRegister(BaseModel):
     email: EmailStr
     password: str
-    role: str = "lawyer"
+
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 12:
+            raise ValueError("Password must be at least 12 characters long.")
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("Password must contain at least one uppercase letter.")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("Password must contain at least one lowercase letter.")
+        if not re.search(r"\d", v):
+            raise ValueError("Password must contain at least one digit.")
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
+            raise ValueError("Password must contain at least one special character.")
+        return v
 
 class UserResponse(BaseModel):
     id: int
@@ -13,6 +29,8 @@ class UserResponse(BaseModel):
     role: str
     firm_logo: Optional[str] = None
     firm_name: Optional[str] = None
+    gst_rate: Optional[float] = 18.0
+    is_disabled: bool = False
 
     class Config:
         from_attributes = True
@@ -20,6 +38,7 @@ class UserResponse(BaseModel):
 class FirmSettingsUpdate(BaseModel):
     firm_name: str
     firm_logo: Optional[str] = None
+    gst_rate: Optional[float] = 18.0
 
 class ClientCreate(BaseModel):
     name: str
@@ -46,7 +65,18 @@ class MatterCreate(BaseModel):
     judge: Optional[str] = None
     opponent_name: Optional[str] = None
     opposing_advocate: Optional[str] = None
-    status: str = "open"
+    status: Literal["open", "pending_hearing", "closed", "archived"] = "open"
+    facts: Optional[str] = None
+    cnr_number: Optional[str] = None
+
+class MatterUpdate(BaseModel):
+    title: Optional[str] = None
+    case_number: Optional[str] = None
+    court: Optional[str] = None
+    judge: Optional[str] = None
+    opponent_name: Optional[str] = None
+    opposing_advocate: Optional[str] = None
+    status: Optional[Literal["open", "pending_hearing", "closed", "archived"]] = None
     facts: Optional[str] = None
     cnr_number: Optional[str] = None
 
@@ -71,8 +101,8 @@ class MatterResponse(BaseModel):
 class ScheduleCreate(BaseModel):
     matter_id: int
     title: str
-    schedule_type: str  # hearing, deadline, meeting
-    target_date: str
+    schedule_type: Literal["hearing", "deadline", "meeting"]  # hearing, deadline, meeting
+    target_date: datetime
     notes: Optional[str] = None
 
 class ScheduleResponse(BaseModel):
@@ -80,7 +110,7 @@ class ScheduleResponse(BaseModel):
     matter_id: int
     title: str
     schedule_type: str
-    target_date: str
+    target_date: datetime
     notes: Optional[str] = None
     is_completed: bool
 
@@ -92,7 +122,6 @@ class DocumentResponse(BaseModel):
     matter_id: Optional[int] = None
     original_name: str
     stored_uuid: str
-    file_path: str
     file_hash: str
     status: str
     uploaded_at: datetime
@@ -113,8 +142,8 @@ class ConflictCheckRequest(BaseModel):
 class FormatDraftRequest(BaseModel):
     draft_text: str
     court_header: str = "none" # none, supreme_court, high_court, district_court
-    line_spacing: float = 1.5
-    margin_spaces: int = 4
+    line_spacing: float = Field(default=1.5, ge=1.0, le=5.0)
+    margin_spaces: int = Field(default=4, ge=0, le=20)
 
 class SimplifyClauseRequest(BaseModel):
     clause_text: str
@@ -123,9 +152,9 @@ class SimplifyClauseRequest(BaseModel):
 class TimeEntryCreate(BaseModel):
     matter_id: int
     description: str
-    hours: str
-    rate_per_hour: str = "5000"
-    date: str
+    hours: float = Field(..., ge=0)
+    rate_per_hour: float = Field(default=5000.0, ge=0)
+    date: date
 
 class InvoiceCreate(BaseModel):
     client_id: int
@@ -133,13 +162,13 @@ class InvoiceCreate(BaseModel):
     notes: Optional[str] = None
 
 class InvoiceStatusUpdate(BaseModel):
-    status: str  # unpaid, paid, overdue
+    status: Literal["unpaid", "paid", "overdue"]  # unpaid, paid, overdue
 
 class AnnotationCreate(BaseModel):
     document_id: int
     selected_text: str
     note: Optional[str] = None
-    color: str = "yellow"
+    color: Literal["yellow", "red", "green", "blue", "purple"] = "yellow"
     page_hint: Optional[str] = None
 
 class TwoFASetupVerify(BaseModel):

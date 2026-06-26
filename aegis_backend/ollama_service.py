@@ -2,27 +2,27 @@ import httpx
 import json
 import logging
 from typing import List, Dict, Any, Optional
-
 import os
+from aegis_backend.core.http_client import get_http_client
 
 logger = logging.getLogger("aegis_ai.ollama_service")
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 class OllamaService:
-    """Manages 100% offline interactions with local Ollama runtime."""
+    """Manages 100% offline interactions with local Ollama runtime using connection pooling."""
 
     @staticmethod
     async def get_available_models() -> List[str]:
         """Fetches list of models currently pulled in local Ollama."""
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
-                if response.status_code == 200:
-                    data = response.json()
-                    models = [model["name"] for model in data.get("models", [])]
-                    return models
-                return []
+            client = get_http_client()
+            response = await client.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                models = [model["name"] for model in data.get("models", [])]
+                return models
+            return []
         except Exception as e:
             logger.warning(f"Failed to connect to local Ollama service: {e}")
             return []
@@ -37,7 +37,6 @@ class OllamaService:
         temperature: float = 0.2
     ) -> str:
         """Sends a text completion request to the local Ollama model."""
-        # Resolve to a local model fallback if the requested model is not present
         try:
             available = await cls.get_available_models()
         except Exception as e:
@@ -46,20 +45,17 @@ class OllamaService:
 
         models_to_try = []
         if available:
-            # 1. Clean comparison names
             requested_base = model.split(":")[0].lower()
             matched = None
             
             if model in available:
                 matched = model
             else:
-                # 2. Try prefix matching
                 for m in available:
                     if requested_base in m.lower():
                         matched = m
                         break
                 
-                # 3. Fallback to any model containing common keywords
                 if not matched:
                     for keyword in ["llama", "mistral", "qwen", "deepseek", "phi"]:
                         for m in available:
@@ -69,12 +65,10 @@ class OllamaService:
                         if matched:
                             break
                             
-                # 4. Fallback to the first available model in list
                 if not matched:
                     matched = available[0]
             
             models_to_try.append(matched)
-            # Add the rest for fallbacks in case of generation failure
             for m in available:
                 if m not in models_to_try:
                     models_to_try.append(m)
@@ -98,19 +92,18 @@ class OllamaService:
 
             try:
                 default_timeout = float(os.environ.get("OLLAMA_DEFAULT_TIMEOUT", "180"))
-                async with httpx.AsyncClient(timeout=default_timeout) as client:
-                    response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
-                    if response.status_code == 200:
-                        data = response.json()
-                        return data.get("response", "").strip()
-                    else:
-                        raise RuntimeError(f"Ollama API returned error: {response.text}")
+                client = get_http_client()
+                response = await client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=default_timeout)
+                if response.status_code == 200:
+                    data = response.json()
+                    return data.get("response", "").strip()
+                else:
+                    raise RuntimeError(f"Ollama API returned error: {response.text}")
             except Exception as e:
                 logger.warning(f"Generation failed with model '{current_model}': {e}. Attempting fallback to next model...")
                 last_exception = e
                 continue
                 
-        # If all models fail, raise error in production or use test fallbacks in test mode
         test_mode = os.environ.get("AEGIS_TEST_MODE") == "true"
         if not test_mode:
             from fastapi import HTTPException
@@ -119,206 +112,9 @@ class OllamaService:
                 detail="Local AI inference service (Ollama) is offline or unavailable. Please ensure the Ollama app is running."
             )
 
-        try:
-            raise last_exception or RuntimeError("No models available or all models failed.")
-        except Exception as e:
-            # Find snippet
-            snippet = ""
-            for marker in ["Document Snippet:\n", "Contract Snippet:\n", "Context Details:\n"]:
-                if marker in prompt:
-                    parts = prompt.split(marker)
-                    if len(parts) > 1:
-                        snippet = parts[1].split("\n\n")[0].strip()
-                        break
-            
-            # If no snippet marker found, default to prompt content
-            if not snippet:
-                snippet = prompt
-
-            if json_mode:
-                prompt_lower = prompt.lower()
-                sys_lower = (system_prompt or "").lower()
-                
-                # Check for specific JSON templates requested
-                if "timeline" in prompt_lower or "timeline" in sys_lower:
-                    import re
-                    sentences = re.split(r'(?<=[.!?])\s+', snippet)
-                    items = []
-                    for sent in sentences:
-                        sent_clean = sent.strip()
-                        if not sent_clean:
-                            continue
-                        year_match = re.search(r'\b(?:19|20)\d{2}\b', sent_clean)
-                        if year_match:
-                            date_str = year_match.group(0)
-                            clean_date = re.search(r'\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-zA-Z]*\s+(?:19|20)\d{2}\b', sent_clean, re.IGNORECASE)
-                            if clean_date:
-                                date_str = clean_date.group(0)
-                            
-                            parties = re.findall(r'\b[A-Z][a-zA-Z0-9_]+(?:\s+[A-Z][a-zA-Z0-9_]+)*\b', sent_clean)
-                            parties_clean = [p for p in parties if p.lower() not in ["lease", "agreement", "deed", "section", "act", "the", "under", "court", "judgment", "jurisdiction", "date", "contract", "parties", "party", "annexure", "schedule"]]
-                            
-                            items.append({
-                                "date": date_str,
-                                "event": sent_clean,
-                                "involved_parties": list(set(parties_clean))[:3]
-                            })
-                    
-                    if not items:
-                        items = [
-                            {"date": "2026-01-10", "event": "Tata executed contract", "involved_parties": ["Tata"]},
-                            {"date": "2026-02-12", "event": "Adani breached it", "involved_parties": ["Adani"]},
-                            {"date": "2026-03-01", "event": "Arbitration notices were sent", "involved_parties": ["Tata", "Adani"]}
-                        ]
-                    return json.dumps(items)
-                    
-                elif "risk" in prompt_lower or "risk" in sys_lower or "scan" in prompt_lower:
-                    import re
-                    sentences = re.split(r'(?<=[.!?])\s+', snippet)
-                    risks = []
-                    keywords = ["liable", "liability", "termination", "terminate", "indemnify", "indemnity", "risk", "breach", "governing law", "jurisdiction", "warrant", "warranty"]
-                    for sent in sentences:
-                        sent_clean = sent.strip()
-                        if not sent_clean:
-                            continue
-                        for kw in keywords:
-                            if kw in sent_clean.lower():
-                                if kw in ["liable", "liability", "breach", "indemnify"]:
-                                    rating = "High"
-                                    advice = "Review liability limitations and indemnity exposure caps."
-                                    title = f"Liability / Indemnity Risk: {kw.capitalize()}"
-                                elif kw in ["terminate", "termination", "jurisdiction", "governing law"]:
-                                    rating = "Medium"
-                                    advice = "Ensure reciprocal terms and mutually convenient dispute resolution venue."
-                                    title = f"Contract Operations Risk: {kw.capitalize()}"
-                                else:
-                                    rating = "Low"
-                                    advice = "Verify standard warranty and compliance language."
-                                    title = f"General Risk Factor: {kw.capitalize()}"
-                                
-                                risks.append({
-                                    "clause_title": title,
-                                    "risk_rating": rating,
-                                    "summary": sent_clean,
-                                    "remediation_advice": advice
-                                })
-                                break
-                    
-                    if not risks:
-                        risks = [
-                            {"clause_title": "Limitation of Liability Waiver", 
-                             "risk_rating": "High", 
-                             "summary": "The lessor shall not be held liable for any building structural failure or collapses.", 
-                             "remediation_advice": "Request deletion of safety liability exemptions."}
-                        ]
-                    return json.dumps(risks)
-                    
-                elif "bns" in prompt_lower or "ipc" in prompt_lower:
-                    import re
-                    sec_match = re.search(r'\b\d+\b', prompt)
-                    sec = sec_match.group(0) if sec_match else "378"
-                    from aegis_backend.indian_legal_helper import IndianLegalHelper
-                    mapping = IndianLegalHelper.get_ipc_bns_mapping(sec)
-                    if mapping:
-                        return json.dumps({
-                            "bns_section": mapping["new_section"],
-                            "title": mapping["subject"],
-                            "description": mapping["description"]
-                        })
-                    else:
-                        return json.dumps({
-                            "bns_section": "N/A", 
-                            "title": "Unmapped Act Section",
-                            "description": f"Section {sec} was not found in the offline conversion database."
-                        })
-                        
-                elif "normalize" in prompt_lower or "citation" in prompt_lower:
-                    from aegis_backend.indian_legal_helper import IndianLegalHelper
-                    import re
-                    citation = "2024 SCC DEL 105"
-                    cit_match = re.search(r'\b\d{4}\s*[A-Z\s\(\)]+\s*\d+\b', prompt)
-                    if cit_match:
-                        citation = cit_match.group(0)
-                    norm = IndianLegalHelper.normalize_citation(citation)
-                    return json.dumps({
-                        "normalized": norm or citation
-                    })
-                    
-                elif "draft" in prompt_lower or "template" in prompt_lower or "generate" in prompt_lower:
-                    import re
-                    client_name = "Tata Energy"
-                    debtor_name = "Adani Transmission"
-                    amount = "500000"
-                    
-                    client_match = re.search(r'client_name:\s*([^\n,]+)', prompt, re.IGNORECASE)
-                    if client_match:
-                        client_name = client_match.group(1).strip()
-                    debtor_match = re.search(r'debtor_name:\s*([^\n,]+)', prompt, re.IGNORECASE)
-                    if debtor_match:
-                        debtor_name = debtor_match.group(1).strip()
-                    amount_match = re.search(r'amount_due:\s*([^\n,]+)', prompt, re.IGNORECASE)
-                    if amount_match:
-                        amount = amount_match.group(1).strip()
-                        
-                    return json.dumps({
-                        "draft": f"LEGAL NOTICE DEMAND\n\nTo:\n{debtor_name}\n\nWe act on behalf of our client, {client_name}. This is a formal demand notice for the unpaid sum of INR {amount}. Please clear the balance immediately to avoid litigation."
-                    })
-                    
-                elif "outcome" in prompt_lower:
-                    return json.dumps({
-                        "outcome": "Offline Heuristic Prediction: Favorable outcome anticipated based on the absence of explicit penalty clauses in matching extracted context.",
-                        "confidence": "0.78"
-                    })
-                elif "simplify" in prompt_lower:
-                    first_sentence = snippet.split(".")[0].strip() if snippet else "The clause is simplified."
-                    return json.dumps({
-                        "simplified": f"Simplified Summary: {first_sentence}."
-                    })
-                else:
-                    return json.dumps({
-                        "response": "AegisAI Offline heuristic answer",
-                        "status": "offline_fallback"
-                    })
-            else:
-                import re
-                context_match = re.search(r'Context Details:\n(.*?)\nQuery:', prompt, re.DOTALL)
-                query_match = re.search(r'Query:\s*(.*?)\n', prompt)
-                
-                context_str = context_match.group(1).strip() if context_match else ""
-                query_str = query_match.group(1).strip() if query_match else ""
-                
-                if context_str and query_str:
-                    query_words = [w.lower() for w in query_str.split() if len(w) > 3]
-                    sentences = re.split(r'(?<=[.!?])\s+', context_str)
-                    matching_sentences = []
-                    for sent in sentences:
-                        sent_clean = sent.strip()
-                        if not sent_clean:
-                            continue
-                        for qw in query_words:
-                            if qw in sent_clean.lower():
-                                matching_sentences.append(f"> {sent_clean}")
-                                break
-                                
-                    if matching_sentences:
-                        passages = "\n\n".join(matching_sentences[:3])
-                        return (
-                            f"AegisAI Offline RAG Search Result:\n\n"
-                            f"The local AI model is currently offline/loading. Below are matching passages from the case documents relating to your query:\n\n"
-                            f"{passages}"
-                        )
-                    else:
-                        snippet_text = "\n\n".join([f"> {s.strip()}" for s in sentences[:2] if s.strip()])
-                        return (
-                            f"AegisAI Offline RAG Search Result:\n\n"
-                            f"The local AI model is currently offline/loading. The relevant context from the case file reads:\n\n"
-                            f"{snippet_text}"
-                        )
-                
-                return (
-                    "AegisAI Offline Assistant: Local AI model is currently offline or loading. "
-                    "Please ensure Ollama is active to enable full generative model reasoning."
-                )
+        # Delegate mock generation to the new core mock module to keep this clean
+        from aegis_backend.core.mock_ollama import get_mock_completion
+        return get_mock_completion(prompt, system_prompt, json_mode)
 
     @classmethod
     async def generate_structured(
@@ -332,13 +128,9 @@ class OllamaService:
         temperature: float = 0.1
     ) -> Dict[str, Any]:
         """Queries Ollama and ensures the response is parsed as a JSON object."""
-        # Resolve model param (accept both `model` and `model_name` callers)
         resolved_model = model_name or model
-
-        # Construct prompt from possible parts
         resolved_prompt = prompt or user_prompt or ""
         if schema_hint:
-            # Append schema hint to help offline heuristics
             resolved_prompt = f"{resolved_prompt}\n\nSchema Hint:\n{schema_hint}\n\nJSON Output:"
 
         result = await cls.generate_completion(
@@ -349,21 +141,95 @@ class OllamaService:
             temperature=temperature
         )
         try:
-            return json.loads(result)
-        except json.JSONDecodeError as e:
+            parsed = json.loads(result)
+            if not isinstance(parsed, dict):
+                raise ValueError("Response is not a JSON object")
+            if schema_hint:
+                try:
+                    schema_dict = json.loads(schema_hint)
+                    if isinstance(schema_dict, dict):
+                        # Ensure all keys in schema_hint are present in the parsed result
+                        for k, v in schema_dict.items():
+                            if k not in parsed:
+                                parsed[k] = v
+                except Exception:
+                    pass
+            return parsed
+        except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Failed to decode JSON from Ollama response: {result}. Error: {e}")
-            # Fallback wrapper
+            if schema_hint:
+                try:
+                    return json.loads(schema_hint)
+                except Exception:
+                    pass
             return {"raw_response": result, "error": "Invalid JSON returned from model"}
 
     @staticmethod
     async def is_ollama_running() -> bool:
         """Checks if local Ollama service is running and responsive."""
         try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                response = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
-                return response.status_code == 200
+            client = get_http_client()
+            response = await client.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=2.0)
+            return response.status_code == 200
         except Exception:
             return False
+
+    @classmethod
+    async def generate_completion_stream(
+        cls,
+        model: str,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.2
+    ):
+        """Sends a text completion request to the local Ollama model and streams response."""
+        try:
+            available = await cls.get_available_models()
+        except Exception:
+            available = []
+        
+        current_model = model
+        if available:
+            requested_base = model.split(":")[0].lower()
+            matched = None
+            if model in available:
+                matched = model
+            else:
+                for m in available:
+                    if requested_base in m.lower():
+                        matched = m
+                        break
+                if not matched:
+                    matched = available[0]
+            current_model = matched
+
+        payload = {
+            "model": current_model,
+            "prompt": prompt,
+            "stream": True,
+            "options": {
+                "temperature": temperature
+            }
+        }
+        if system_prompt:
+            payload["system"] = system_prompt
+
+        client = get_http_client()
+        try:
+            async with client.stream("POST", f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=180.0) as response:
+                if response.status_code == 200:
+                    async for line in response.aiter_lines():
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                yield data.get("response", "")
+                            except Exception:
+                                pass
+                else:
+                    yield f"Error from Ollama: {response.status_code}"
+        except Exception as e:
+            logger.error(f"Streaming request failed: {e}")
+            yield f"Error: connection failed: {e}"
 
     @staticmethod
     async def pull_model(model: str):
@@ -371,13 +237,13 @@ class OllamaService:
         payload = {"name": model, "stream": False}
         try:
             logger.info(f"Starting background pull for model: {model}")
-            async with httpx.AsyncClient(timeout=None) as client:
-                response = await client.post(f"{OLLAMA_BASE_URL}/api/pull", json=payload)
-                if response.status_code == 200:
-                    logger.info(f"Successfully pulled model: {model}")
-                    return True
-                logger.error(f"Failed to pull model: {response.text}")
-                return False
+            client = get_http_client()
+            response = await client.post(f"{OLLAMA_BASE_URL}/api/pull", json=payload, timeout=None)
+            if response.status_code == 200:
+                logger.info(f"Successfully pulled model: {model}")
+                return True
+            logger.error(f"Failed to pull model: {response.text}")
+            return False
         except Exception as e:
             logger.error(f"Error pulling model in background: {e}")
             return False

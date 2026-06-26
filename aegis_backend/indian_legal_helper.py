@@ -1,4 +1,6 @@
 import re
+import os
+import json
 from typing import Dict, Any, Optional
 
 # Standard citation normalization regexes
@@ -148,12 +150,29 @@ class IndianLegalHelper:
         act_upper = act.upper().strip()
         sec_clean = section.strip()
 
+        # Try to load mappings dynamically from JSON file
+        ipc_map = cls.IPC_TO_BNS_MAP
+        crpc_map = cls.CRPC_TO_BNSS_MAP
+        iea_map = cls.IEA_TO_BSA_MAP
+
+        try:
+            curr_dir = os.path.dirname(os.path.abspath(__file__))
+            json_path = os.path.join(curr_dir, "legal_mappings.json")
+            if os.path.exists(json_path):
+                with open(json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    ipc_map = data.get("IPC_TO_BNS_MAP", ipc_map)
+                    crpc_map = data.get("CRPC_TO_BNSS_MAP", crpc_map)
+                    iea_map = data.get("IEA_TO_BSA_MAP", iea_map)
+        except Exception:
+            pass  # Fallback to local hardcoded configurations on any dynamic load error
+
         if "IPC" in act_upper:
-            return cls.IPC_TO_BNS_MAP.get(sec_clean)
+            return ipc_map.get(sec_clean)
         elif "CRPC" in act_upper:
-            return cls.CRPC_TO_BNSS_MAP.get(sec_clean)
+            return crpc_map.get(sec_clean)
         elif "IEA" in act_upper or "EVIDENCE" in act_upper:
-            return cls.IEA_TO_BSA_MAP.get(sec_clean)
+            return iea_map.get(sec_clean)
         return None
 
     @classmethod

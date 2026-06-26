@@ -1,11 +1,10 @@
 import os
 import json
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, TypeDecorator, event
+from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, Date, Numeric, ForeignKey, TypeDecorator, event
 from sqlalchemy.pool import StaticPool, NullPool
 from sqlalchemy.engine import Engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker, relationship, DeclarativeBase
 from cryptography.fernet import Fernet
 import base64
 
@@ -17,41 +16,117 @@ os.makedirs(os.path.join(AEGIS_DIR, "vault"), exist_ok=True)
 os.makedirs(os.path.join(AEGIS_DIR, "backups"), exist_ok=True)
 
 DB_PATH = os.path.join(AEGIS_DIR, "aegis_ai.db")
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://aegis:aegis_password@localhost:5432/aegis_ai")
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False, "timeout": 60.0},
-    poolclass=NullPool
-)
+engine_args = {}
+if DATABASE_URL.startswith("sqlite"):
+    engine_args = {
+        "connect_args": {"check_same_thread": False},
+        "poolclass": NullPool if ("test" in DATABASE_URL or ":memory:" in DATABASE_URL) else None
+    }
+else:
+    sync_db_url = DATABASE_URL
+    if sync_db_url.startswith("postgresql://") and not sync_db_url.startswith("postgresql+"):
+        sync_db_url = sync_db_url.replace("postgresql://", "postgresql+pg8000://")
+    engine = create_engine(
+        sync_db_url,
+        pool_size=20,
+        max_overflow=40,
+        pool_recycle=3600
+    )
 
-@event.listens_for(Engine, "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.close()
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, **engine_args)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
 
-# Cryptographic Master Key derivation (stores salt/key securely in the config folder)
+class Base(DeclarativeBase):
+    pass
+
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
+if DATABASE_URL.startswith("sqlite"):
+    async_db_url = DATABASE_URL
+    if async_db_url.startswith("sqlite://") and not async_db_url.startswith("sqlite+aiosqlite://"):
+        async_db_url = async_db_url.replace("sqlite://", "sqlite+aiosqlite://")
+    async_engine = create_async_engine(
+        async_db_url,
+        connect_args={"check_same_thread": False}
+    )
+else:
+    async_db_url = DATABASE_URL
+    if async_db_url.startswith("postgresql://") and not async_db_url.startswith("postgresql+"):
+        async_db_url = async_db_url.replace("postgresql://", "postgresql+asyncpg://")
+    async_engine = create_async_engine(
+        async_db_url,
+        pool_size=20,
+        max_overflow=40,
+        pool_recycle=3600
+    )
+
+AsyncSessionLocal = async_sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=async_engine, class_=AsyncSession)
+
+
+# Cryptographic Master Key derivation (stores salt/key securely in OS keyring or fallback local file)
 KEY_PATH = os.path.join(AEGIS_DIR, ".master.key")
-if not os.path.exists(KEY_PATH):
-    # Generate a fresh random key if missing
-    new_key = Fernet.generate_key()
-    with open(KEY_PATH, "wb") as f:
-        f.write(new_key)
+
+def get_secure_key(key_name: str, fallback_path: str, is_hex: bool = False):
+    # 1. Check environment variable override
+    env_var = f"AEGIS_{key_name.upper()}_KEY"
+    env_val = os.environ.get(env_var)
+    if env_val:
+        return env_val.strip()
+        
+    # 2. Try OS Keyring (cross-platform secure storage)
     try:
-        os.chmod(KEY_PATH, 0o600)
+        import keyring
+        stored = keyring.get_password("AegisAI", key_name)
+        if stored:
+            if not is_hex:
+                return stored.encode("utf-8")
+            return stored
     except Exception:
         pass
-else:
-    with open(KEY_PATH, "rb") as f:
-        new_key = f.read()
+        
+    # 3. Fallback to local files (with 0600 permissions)
+    if os.path.exists(fallback_path):
+        try:
+            with open(fallback_path, "r" if is_hex else "rb") as f:
+                val = f.read()
+                return val.strip() if is_hex else val
+        except Exception:
+            pass
+            
+    # 4. Generate new key if not found anywhere
+    if is_hex:
+        import secrets
+        new_key = secrets.token_hex(32)
+    else:
+        new_key = Fernet.generate_key()
+        
+    # Store to OS Keyring
+    try:
+        import keyring
+        keyring.set_password("AegisAI", key_name, new_key if is_hex else new_key.decode("utf-8"))
+    except Exception:
+        pass
+        
+    # Store to local file as backup fallback
+    try:
+        mode = "w" if is_hex else "wb"
+        with open(fallback_path, mode) as f:
+            f.write(new_key)
+        try:
+            os.chmod(fallback_path, 0o600)
+        except Exception:
+            pass
+    except Exception:
+        pass
+        
+    return new_key
 
-cipher = Fernet(new_key)
+master_key = get_secure_key("master", KEY_PATH, is_hex=False)
+cipher = Fernet(master_key)
 
 class EncryptedText(TypeDecorator):
     """Saves transparently AES-256 encrypted fields in SQLite."""
@@ -81,7 +156,11 @@ class User(Base):
     role = Column(String, default="lawyer", nullable=False) # admin, lawyer, auditor
     firm_logo = Column(Text, nullable=True) # base64 logo string
     firm_name = Column(String, nullable=True)
+    gst_rate = Column(Numeric(5, 2), default=18.0, nullable=False)
+    must_change_password = Column(Boolean, default=False, nullable=False)
+    is_disabled = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
 class Client(Base):
     __tablename__ = "clients"
@@ -91,6 +170,7 @@ class Client(Base):
     phone = Column(String, nullable=True)
     notes = Column(EncryptedText, nullable=True) # Transparently Encrypted Notes
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
     
     matters = relationship("Matter", back_populates="client", cascade="all, delete-orphan")
 
@@ -110,6 +190,7 @@ class Matter(Base):
     is_locked = Column(Boolean, default=False, nullable=False)
     hmac_signature = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     client = relationship("Client", back_populates="matters")
     schedules = relationship("Schedule", back_populates="matter", cascade="all, delete-orphan")
@@ -121,9 +202,11 @@ class Schedule(Base):
     matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), nullable=False)
     title = Column(String, nullable=False)
     schedule_type = Column(String, nullable=False) # hearing, deadline, meeting
-    target_date = Column(String, nullable=False) # ISO timestamp
+    target_date = Column(DateTime, nullable=False) # DateTime column
     notes = Column(Text, nullable=True)
     is_completed = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     matter = relationship("Matter", back_populates="schedules")
 
@@ -137,6 +220,7 @@ class Document(Base):
     file_hash = Column(String, index=True, nullable=False)
     status = Column(String, default="uploaded", nullable=False) # uploaded, processing, ocr_needed, processed, failed
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     matter = relationship("Matter", back_populates="documents")
 
@@ -149,6 +233,7 @@ class AuditLog(Base):
     target_id = Column(String, nullable=True)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
     details = Column(Text, nullable=True)
+    entry_hash = Column(String, nullable=True)
 
 class BackupHistory(Base):
     __tablename__ = "backup_history"
@@ -169,6 +254,12 @@ class BareActSection(Base):
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False)
 
+class AuthRateLimit(Base):
+    __tablename__ = "auth_rate_limits"
+    id = Column(Integer, primary_key=True, index=True)
+    ip_address = Column(String, index=True, nullable=False)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
+
 # ====== BILLING ======
 class TimeEntry(Base):
     __tablename__ = "time_entries"
@@ -176,10 +267,11 @@ class TimeEntry(Base):
     matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), nullable=False)
     user_email = Column(String, nullable=False)
     description = Column(Text, nullable=False)
-    hours = Column(String, nullable=False)       # stored as string decimal
-    rate_per_hour = Column(String, nullable=False, default="5000")  # INR
-    date = Column(String, nullable=False)        # ISO date string
+    hours = Column(Numeric(10, 2), nullable=False)
+    rate_per_hour = Column(Numeric(10, 2), nullable=False, default=5000.0)
+    date = Column(Date, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 class Invoice(Base):
     __tablename__ = "invoices"
@@ -187,12 +279,13 @@ class Invoice(Base):
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
     matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), nullable=True)
     invoice_number = Column(String, unique=True, nullable=False)
-    total_amount = Column(String, nullable=False)    # INR string
-    gst_amount = Column(String, nullable=False)      # 18% GST
-    grand_total = Column(String, nullable=False)
-    status = Column(String, default="unpaid")        # unpaid, paid, overdue
+    total_amount = Column(Numeric(10, 2), nullable=False)
+    gst_amount = Column(Numeric(10, 2), nullable=False)
+    grand_total = Column(Numeric(10, 2), nullable=False)
+    status = Column(String, default="unpaid") # unpaid, paid, overdue
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 # ====== ANNOTATIONS ======
 class Annotation(Base):
@@ -205,6 +298,7 @@ class Annotation(Base):
     color = Column(String, default="yellow")   # yellow, green, red, blue
     page_hint = Column(String, nullable=True)  # rough text position hint
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 # ====== 2FA ======
 class TwoFactorSecret(Base):
@@ -215,67 +309,74 @@ class TwoFactorSecret(Base):
     is_enabled = Column(Boolean, default=False)
     recovery_codes = Column(Text, nullable=True)  # JSON list of hashed codes
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+def run_migrations():
+    import alembic.config
+    import alembic.command
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ini_path = os.path.join(base_dir, "alembic.ini")
+    if os.path.exists(ini_path):
+        cfg = alembic.config.Config(ini_path)
+        cfg.set_main_option("script_location", os.path.join(base_dir, "alembic"))
+        cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+        alembic.command.upgrade(cfg, "head")
+    else:
+        Base.metadata.create_all(bind=engine)
 
 def init_db():
-    from sqlalchemy import text
-    Base.metadata.create_all(bind=engine)
-    
-    # Run offline schema alterations for column addition safety
     try:
-        with engine.connect() as conn:
-            info = conn.execute(text("PRAGMA table_info(matters)")).fetchall()
-            existing_cols = [row[1] for row in info]
-            if "opponent_name" not in existing_cols:
-                conn.execute(text("ALTER TABLE matters ADD COLUMN opponent_name TEXT"))
-            if "opposing_advocate" not in existing_cols:
-                conn.execute(text("ALTER TABLE matters ADD COLUMN opposing_advocate TEXT"))
-            if "cnr_number" not in existing_cols:
-                conn.execute(text("ALTER TABLE matters ADD COLUMN cnr_number TEXT"))
-            if "is_locked" not in existing_cols:
-                conn.execute(text("ALTER TABLE matters ADD COLUMN is_locked INTEGER DEFAULT 0"))
-            if "hmac_signature" not in existing_cols:
-                conn.execute(text("ALTER TABLE matters ADD COLUMN hmac_signature TEXT"))
-                
-            user_info = conn.execute(text("PRAGMA table_info(users)")).fetchall()
-            existing_user_cols = [row[1] for row in user_info]
-            if "firm_logo" not in existing_user_cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN firm_logo TEXT"))
-            if "firm_name" not in existing_user_cols:
-                conn.execute(text("ALTER TABLE users ADD COLUMN firm_name TEXT"))
-                
-            conn.commit()
-    except Exception as ex:
-        print(f"Offline migrations error: {ex}")
+        run_migrations()
+    except Exception as e:
+        print(f"Programmatic migrations failed: {e}. Falling back to create_all.")
+        Base.metadata.create_all(bind=engine)
 
     # Ensure a partial unique index on case_number that only applies to non-null values
-    try:
-        with engine.begin() as conn:
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_matters_case_number_notnull ON matters(case_number) WHERE case_number IS NOT NULL"))
-    except Exception as ex:
-        print(f"Could not create partial unique index for case_number: {ex}")
+    if DATABASE_URL.startswith("sqlite"):
+        from sqlalchemy import text
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_matters_case_number_notnull ON matters(case_number) WHERE case_number IS NOT NULL"))
+        except Exception as ex:
+            print(f"Could not create partial unique index for case_number: {ex}")
 
     db = SessionLocal()
     try:
         # Seed admin
         admin_exists = db.query(User).filter(User.role == "admin").first()
-        # In production, do not automatically seed admin with default password unless AEGIS_TEST_MODE is true or AEGIS_ADMIN_PASSWORD is set.
         admin_pw = os.environ.get("AEGIS_ADMIN_PASSWORD")
         test_mode = os.environ.get("AEGIS_TEST_MODE") == "true"
         
-        if not admin_exists and (admin_pw or test_mode):
+        if not admin_exists:
             import bcrypt
             import logging
-            actual_pw = admin_pw or "adminpassword123"
-            if actual_pw == "adminpassword123":
-                logging.getLogger("aegis_ai.backend").warning(
-                    "SECURITY WARNING: Default admin password 'adminpassword123' is being seeded. "
-                    "Please set the 'AEGIS_ADMIN_PASSWORD' environment variable to secure the administrator account."
+            import secrets
+            
+            logger = logging.getLogger("aegis_ai.backend")
+            
+            if admin_pw:
+                actual_pw = admin_pw
+                logger.info("Seeding admin account using password from AEGIS_ADMIN_PASSWORD environment variable.")
+            elif test_mode:
+                actual_pw = "adminpassword123"
+                logger.warning("AEGIS_TEST_MODE is enabled. Seeding admin account with default password 'adminpassword123'.")
+            else:
+                actual_pw = secrets.token_urlsafe(16)
+                logger.warning(
+                    "\n" + "="*80 + "\n"
+                    "SECURITY WARNING: Seeding default admin account (admin@legalai.local) with a programmatically generated password.\n"
+                    f"Generated Password: {actual_pw}\n"
+                    "Please store this password safely. You will be forced to change this password on first login.\n"
+                    "To set a custom admin password, configure 'AEGIS_ADMIN_PASSWORD' in your environment.\n" +
+                    "="*80 + "\n"
                 )
+                
             hashed = bcrypt.hashpw(actual_pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
             default_admin = User(
                 email="admin@legalai.local",
                 hashed_password=hashed,
-                role="admin"
+                role="admin",
+                must_change_password=True
             )
             db.add(default_admin)
             db.commit()
@@ -351,7 +452,7 @@ def init_db():
                     content="63. Notwithstanding anything contained in this Adhiniyam, any information contained in an electronic record which is printed on paper, stored, recorded or copied in optical or magnetic media produced by a computer... shall be deemed to be also a document... and shall be admissible in any proceedings, without further proof or production of the original."
                 )
             ]
-            db.bulk_save_objects(seed_sections)
+            db.add_all(seed_sections)
             db.commit()
     except Exception as e:
         print(f"Error seeding default admin account: {e}")
@@ -362,12 +463,11 @@ def init_db():
     finally:
         db.close()
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
+async def get_db():
+    async with AsyncSessionLocal() as db:
+        try:
+            yield db
+        except Exception:
+            await db.rollback()
+            raise
+

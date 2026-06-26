@@ -4,40 +4,52 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status, Response
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 
 from aegis_backend.database import get_db, User, Client, Matter, Schedule
-from aegis_backend.schemas.models import MatterCreate, MatterResponse, ConflictCheckRequest
+from aegis_backend.schemas.models import MatterCreate, MatterResponse, MatterUpdate, ConflictCheckRequest
 from aegis_backend.core.security import (
     get_current_user, verify_lawyer_or_admin, verify_offline_mode,
-    log_audit_trail, SECRET_KEY
+    log_audit_trail, SECRET_KEY, safe_db_rollback
 )
+from aegis_backend.core.cache import rag_cache
 from aegis_backend.routers.clients import cleanup_matter_documents
 
-router = APIRouter(prefix="/api", tags=["matters"])
+router = APIRouter(tags=["matters"])
 
-def _safe_db_rollback(db_candidate=None):
-    try:
-        db = db_candidate
-        if db is None:
-            return
-        if hasattr(db, "rollback"):
-            db.rollback()
-    except Exception:
-        pass
+
 
 @router.get("/matters", response_model=List[MatterResponse])
-def list_matters(client_id: Optional[int] = None, skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    query = db.query(Matter)
+async def list_matters(response: Response, client_id: Optional[int] = None, skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    stmt = select(Matter)
     if current_user.role == "client":
-        client = db.query(Client).filter(Client.email == current_user.email).first()
+        stmt_client = select(Client).filter(Client.email == current_user.email)
+        res_client = await db.execute(stmt_client)
+        client = res_client.scalars().first()
         if not client:
+            response.headers["X-Total-Count"] = "0"
             return []
-        query = query.filter(Matter.client_id == client.id)
+        stmt = stmt.filter(Matter.client_id == client.id)
     elif client_id:
-        query = query.filter(Matter.client_id == client_id)
-    matters = query.offset(skip).limit(limit).all()
+        stmt = stmt.filter(Matter.client_id == client_id)
+    
+    # Calculate count
+    if current_user.role == "client" and client:
+        count_stmt = select(func.count(Matter.id)).filter(Matter.client_id == client.id)
+    elif client_id:
+        count_stmt = select(func.count(Matter.id)).filter(Matter.client_id == client_id)
+    else:
+        count_stmt = select(func.count(Matter.id))
+        
+    count_res = await db.execute(count_stmt)
+    total_count = count_res.scalar()
+    response.headers["X-Total-Count"] = str(total_count)
+
+    res = await db.execute(stmt.offset(skip).limit(limit))
+    matters = res.scalars().all()
     for m in matters:
         if m.is_locked and m.hmac_signature:
             payload = f"{m.id}:{m.case_number}:{m.court}:{m.judge}:{m.status}"
@@ -47,7 +59,7 @@ def list_matters(client_id: Optional[int] = None, skip: int = 0, limit: int = 10
     return matters
 
 @router.post("/matters", response_model=MatterResponse)
-def create_matter(matter_in: MatterCreate, db: Session = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin), _ = Depends(verify_offline_mode)):
+async def create_matter(matter_in: MatterCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin), _ = Depends(verify_offline_mode)):
     matter = Matter(
         client_id=matter_in.client_id,
         case_number=matter_in.case_number,
@@ -61,28 +73,61 @@ def create_matter(matter_in: MatterCreate, db: Session = Depends(get_db), curren
         cnr_number=matter_in.cnr_number
     )
     db.add(matter)
-    db.commit()
-    db.refresh(matter)
-    log_audit_trail(db, current_user.email, "CREATE", "matters", str(matter.id))
+    await db.commit()
+    await db.refresh(matter)
+
+    # Invalidate RAG Cache
+    rag_cache.clear()
+
+    await log_audit_trail(db, current_user.email, "CREATE", "matters", str(matter.id))
     return matter
 
 @router.delete("/matters/{id}")
-def delete_matter(id: int, db: Session = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin), _ = Depends(verify_offline_mode)):
-    matter = db.query(Matter).filter(Matter.id == id).first()
+async def delete_matter(id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin), _ = Depends(verify_offline_mode)):
+    stmt = select(Matter).filter(Matter.id == id)
+    res = await db.execute(stmt)
+    matter = res.scalars().first()
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
     
     # Cascade clean documents, files, and vectors belonging to this matter
-    cleanup_matter_documents(matter.id, db)
+    await cleanup_matter_documents(matter.id, db)
     
-    db.delete(matter)
-    db.commit()
-    log_audit_trail(db, current_user.email, "DELETE", "matters", str(id))
+    await db.delete(matter)
+    await db.commit()
+
+    # Invalidate RAG Cache
+    rag_cache.clear()
+
+    await log_audit_trail(db, current_user.email, "DELETE", "matters", str(id))
     return {"status": "success"}
 
+@router.put("/matters/{id}", response_model=MatterResponse)
+async def update_matter(id: int, matter_in: MatterUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin), _ = Depends(verify_offline_mode)):
+    stmt = select(Matter).filter(Matter.id == id)
+    res = await db.execute(stmt)
+    matter = res.scalars().first()
+    if not matter:
+        raise HTTPException(status_code=404, detail="Matter not found")
+        
+    update_data = matter_in.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(matter, field, value)
+        
+    await db.commit()
+    await db.refresh(matter)
+    
+    # Invalidate RAG Cache
+    rag_cache.clear()
+    
+    await log_audit_trail(db, current_user.email, "UPDATE", "matters", str(id))
+    return matter
+
 @router.post("/matters/{id}/sync-ecourts")
-async def sync_ecourts_cnr(id: int, db: Session = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
-    matter = db.query(Matter).filter(Matter.id == id).first()
+async def sync_ecourts_cnr(id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+    stmt = select(Matter).filter(Matter.id == id)
+    res = await db.execute(stmt)
+    matter = res.scalars().first()
     if not matter:
         raise HTTPException(status_code=404, detail="Matter not found")
     if not matter.cnr_number:
@@ -90,101 +135,28 @@ async def sync_ecourts_cnr(id: int, db: Session = Depends(get_db), current_user:
     if matter.is_locked:
         return {"status": "locked", "message": "This matter's data has been locked locally to prevent remote tampering or hijacking. (eCourts Sync Simulation Mode)", "is_simulation": True}
     
-    # Check actual internet connectivity (async)
-    import httpx
-    is_online = False
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            res = await client.get("https://www.google.com")
-            if res.status_code == 200:
-                is_online = True
-    except Exception:
-        _safe_db_rollback(db)
-        pass
+    # In simulation mode, we bypass external DNS checks to prevent metadata leakage.
+    is_online = True
 
     if not is_online:
         raise HTTPException(
             status_code=503,
             detail="Offline mode active. Internet connection required to sync with the eCourts platform. Please go online and try again."
         )
-
-    # Call online latency test target to simulate actual remote API request delay
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.get("https://httpbin.org/delay/1")
-    except Exception as e:
-        _safe_db_rollback(db)
-    
-    judges = ["Hon'ble Mr. Justice D. Y. Chandrachud", "Hon'ble Mrs. Justice Hima Kohli", "Hon'ble Mr. Justice Sanjiv Khanna"]
-    status_choices = ["open", "pending_hearing", "closed"]
-    courts = ["Supreme Court of India", "High Court of Delhi", "District Court of Saket"]
-    
-    cnr_seed = sum(ord(c) for c in matter.cnr_number)
-    random.seed(cnr_seed)
-    
-    fetched_court = random.choice(courts)
-    fetched_judge = random.choice(judges)
-    fetched_status = random.choice(status_choices)
-    
-    hearing_date = (datetime.now() + timedelta(days=10)).isoformat()
-    
-    matter.court = fetched_court
-    matter.judge = fetched_judge
-    matter.status = fetched_status
-    
-    existing_schedule = db.query(Schedule).filter(
-        Schedule.matter_id == matter.id, 
-        Schedule.schedule_type == "hearing"
-    ).first()
-    
-    if not existing_schedule:
-        new_s = Schedule(
-            matter_id=matter.id,
-            title="eCourts Synced Hearing Date",
-            schedule_type="hearing",
-            target_date=hearing_date,
-            notes=f"Automatically synchronized and locked via eCourts CNR {matter.cnr_number}"
-        )
-        db.add(new_s)
-    else:
-        existing_schedule.target_date = hearing_date
-        existing_schedule.notes = f"Updated via eCourts CNR sync on {datetime.now().strftime('%Y-%m-%d')}"
-        
-    matter.is_locked = True
-    
-    payload = f"{matter.id}:{matter.case_number}:{matter.court}:{matter.judge}:{matter.status}"
-    matter.hmac_signature = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
-    
-    db.commit()
-    db.refresh(matter)
-    log_audit_trail(db, current_user.email, "ECOURTS_SYNC", "matters", str(id), f"CNR: {matter.cnr_number} synced and locked.")
-    
-    return {
-        "status": "success", 
-        "message": "Data synchronized successfully and immediately locked locally. Connection disconnected. (eCourts Sync Simulation Mode)",
-        "is_simulation": True,
-        "court": fetched_court,
-        "judge": fetched_judge,
-        "hearing_date": hearing_date
-    }
+    from aegis_backend.services.matter_service import MatterService
+    result = await MatterService.sync_ecourts_cnr(db, matter)
+    await log_audit_trail(db, current_user.email, "ECOURTS_SYNC", "matters", str(id), f"CNR: {matter.cnr_number} synced and locked.")
+    return result
 
 @router.get("/ecourts/lookup")
-async def ecourts_lookup(cnr: str, current_user: User = Depends(verify_lawyer_or_admin), db: Session = Depends(get_db)):
+async def ecourts_lookup(cnr: str, current_user: User = Depends(verify_lawyer_or_admin), db: AsyncSession = Depends(get_db)):
     if not cnr or len(cnr.strip()) < 6:
         raise HTTPException(status_code=400, detail="A valid CNR number is required (min 6 characters)")
 
     cnr = cnr.strip().upper()
 
-    import httpx
-    is_online = False
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            res = await client.get("https://www.google.com")
-            if res.status_code == 200:
-                is_online = True
-    except Exception:
-        _safe_db_rollback(db)
-        pass
+    # In simulation mode, we bypass external DNS checks to prevent metadata leakage.
+    is_online = True
 
     if not is_online:
         raise HTTPException(
@@ -213,19 +185,19 @@ async def ecourts_lookup(cnr: str, current_user: User = Depends(verify_lawyer_or
     respondents = ["Respondent Industries Ltd.", "State Bank of India", "Income Tax Department"]
 
     cnr_seed = sum(ord(c) for c in cnr)
-    random.seed(cnr_seed)
+    rng = random.Random(cnr_seed)
 
-    fetched_court = random.choice(courts)
-    fetched_judge = random.choice(judges)
-    fetched_status = random.choice(status_choices)
-    fetched_case_type = random.choice(case_types)
-    fetched_petitioner = random.choice(petitioners)
-    fetched_respondent = random.choice(respondents)
-    fetched_case_number = f"CS No. {random.randint(100, 9999)}/{datetime.now().year - random.randint(0, 5)}"
-    next_date = (datetime.now() + timedelta(days=random.randint(5, 60))).strftime("%d %B %Y")
-    filed_date = (datetime.now() - timedelta(days=random.randint(30, 1800))).strftime("%d %B %Y")
+    fetched_court = rng.choice(courts)
+    fetched_judge = rng.choice(judges)
+    fetched_status = rng.choice(status_choices)
+    fetched_case_type = rng.choice(case_types)
+    fetched_petitioner = rng.choice(petitioners)
+    fetched_respondent = rng.choice(respondents)
+    fetched_case_number = f"CS No. {rng.randint(100, 9999)}/{datetime.now().year - rng.randint(0, 5)}"
+    next_date = (datetime.now() + timedelta(days=rng.randint(5, 60))).strftime("%d %B %Y")
+    filed_date = (datetime.now() - timedelta(days=rng.randint(30, 1800))).strftime("%d %B %Y")
 
-    log_audit_trail(db, current_user.email, "ECOURTS_LOOKUP", "ecourts", cnr, f"Online lookup for CNR {cnr}")
+    await log_audit_trail(db, current_user.email, "ECOURTS_LOOKUP", "ecourts", cnr, f"Online lookup for CNR {cnr}")
 
     return {
         "cnr": cnr,
@@ -249,7 +221,7 @@ async def ecourts_lookup(cnr: str, current_user: User = Depends(verify_lawyer_or
     }
 
 @router.post("/matters/check-conflict")
-def check_legal_conflict(req: ConflictCheckRequest, db: Session = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+async def check_legal_conflict(req: ConflictCheckRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
     conflict_detected = False
     severity = "low"
     reasons = []
@@ -260,21 +232,25 @@ def check_legal_conflict(req: ConflictCheckRequest, db: Session = Depends(get_db
     if not clean_client or not clean_opponent:
         raise HTTPException(status_code=400, detail="Client name and Opponent name are required.")
 
-    clients = db.query(Client).all()
+    stmt_clients = select(Client)
+    res_clients = await db.execute(stmt_clients)
+    clients = res_clients.scalars().all()
     for c in clients:
         if clean_opponent in c.name.upper() or c.name.upper() in clean_opponent:
             conflict_detected = True
             severity = "high"
             reasons.append(f"DIRECT CONFLICT: Opponent '{req.opponent_name}' matches active client folder '{c.name}' (Client ID: {c.id}).")
 
-    matters = db.query(Matter).all()
+    stmt_matters = select(Matter).options(selectinload(Matter.client))
+    res_matters = await db.execute(stmt_matters)
+    matters = res_matters.scalars().all()
     for m in matters:
         if m.opponent_name:
             clean_matter_opp = m.opponent_name.strip().upper()
             if clean_client in clean_matter_opp or clean_matter_opp in clean_client:
                 conflict_detected = True
                 severity = "high"
-                reasons.append(f"INDIRECT CONFLICT: Prospective client '{req.client_name}' is listed as Opponent in active matter file '{m.title}' (Matter ID: {m.id}, Client: {m.client.name}).")
+                reasons.append(f"INDIRECT CONFLICT: Prospective client '{req.client_name}' is listed as Opponent in active matter file '{m.title}' (Matter ID: {m.id}, Client: {m.client.name if m.client else 'Unknown'}).")
         
         if m.client:
             clean_matter_client = m.client.name.strip().upper()
@@ -284,7 +260,7 @@ def check_legal_conflict(req: ConflictCheckRequest, db: Session = Depends(get_db
                     severity = "medium"
                 reasons.append(f"ASSOCIATED RISK: Prospective opponent '{req.opponent_name}' matches client '{m.client.name}' in matter file '{m.title}'.")
 
-    log_audit_trail(
+    await log_audit_trail(
         db, 
         current_user.email, 
         "CONFLICT_CHECK", 
@@ -299,3 +275,4 @@ def check_legal_conflict(req: ConflictCheckRequest, db: Session = Depends(get_db
         "severity": severity,
         "reasons": reasons
     }
+

@@ -1,40 +1,48 @@
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
 from aegis_backend.database import get_db, User, Client, Matter, Document, Invoice, Schedule
 from aegis_backend.core.security import get_current_user
 
-router = APIRouter(prefix="/api", tags=["analytics"])
+router = APIRouter(tags=["analytics"])
 
 @router.get("/analytics/summary")
-def analytics_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    total_clients = db.query(Client).count()
-    total_matters = db.query(Matter).count()
-    open_matters = db.query(Matter).filter(Matter.status == "open").count()
-    closed_matters = db.query(Matter).filter(Matter.status == "closed").count()
-    total_docs = db.query(Document).count()
-    total_invoices = db.query(Invoice).count()
-    paid_invoices = db.query(Invoice).filter(Invoice.status == "paid").count()
-    unpaid_invoices = db.query(Invoice).filter(Invoice.status == "unpaid").count()
+async def analytics_summary(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    total_clients = (await db.execute(select(func.count(Client.id)))).scalar()
+    total_matters = (await db.execute(select(func.count(Matter.id)))).scalar()
+    open_matters = (await db.execute(select(func.count(Matter.id)).filter(Matter.status == "open"))).scalar()
+    closed_matters = (await db.execute(select(func.count(Matter.id)).filter(Matter.status == "closed"))).scalar()
+    total_docs = (await db.execute(select(func.count(Document.id)))).scalar()
+    total_invoices = (await db.execute(select(func.count(Invoice.id)))).scalar()
+    paid_invoices = (await db.execute(select(func.count(Invoice.id)).filter(Invoice.status == "paid"))).scalar()
+    unpaid_invoices = (await db.execute(select(func.count(Invoice.id)).filter(Invoice.status == "unpaid"))).scalar()
     
     # Revenue totals
-    all_paid = db.query(Invoice).filter(Invoice.status == "paid").all()
-    total_revenue = sum(float(i.grand_total) for i in all_paid)
-    pending_revenue_invs = db.query(Invoice).filter(Invoice.status == "unpaid").all()
-    pending_revenue = sum(float(i.grand_total) for i in pending_revenue_invs)
+    res_paid = await db.execute(select(func.sum(Invoice.grand_total)).filter(Invoice.status == "paid"))
+    total_revenue = res_paid.scalar() or 0.0
+    
+    res_pending = await db.execute(select(func.sum(Invoice.grand_total)).filter(Invoice.status == "unpaid"))
+    pending_revenue = res_pending.scalar() or 0.0
 
     # Upcoming hearings in next 7 days
     now = datetime.now(timezone.utc).isoformat()
     week_later = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
-    upcoming = db.query(Schedule).filter(
+    
+    stmt_upcoming = select(Schedule).filter(
         Schedule.is_completed == False,
         Schedule.target_date >= now,
         Schedule.target_date <= week_later
-    ).order_by(Schedule.target_date).limit(10).all()
+    ).order_by(Schedule.target_date).limit(10)
+    
+    res_upcoming = await db.execute(stmt_upcoming)
+    upcoming = res_upcoming.scalars().all()
 
     # Recent invoices
-    recent_invoices = db.query(Invoice).order_by(Invoice.created_at.desc()).limit(5).all()
+    stmt_recent = select(Invoice).order_by(Invoice.created_at.desc()).limit(5)
+    res_recent = await db.execute(stmt_recent)
+    recent_invoices = res_recent.scalars().all()
 
     return {
         "total_clients": total_clients,
@@ -57,3 +65,4 @@ def analytics_summary(db: Session = Depends(get_db), current_user: User = Depend
             for i in recent_invoices
         ]
     }
+
