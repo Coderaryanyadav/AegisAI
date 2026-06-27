@@ -199,11 +199,11 @@ export default function Home() {
   
   interface NotificationType {
     message: string;
-    type: "success" | "error" | "info";
+    type: "success" | "error" | "info" | "warning";
   }
   // Global Toast Notification
   const [notification, setNotification] = useState<NotificationType | null>(null);
-  const notificationTimeoutRef = useRef<number | null>(null);
+  const notificationTimeoutRef = useRef<any>(null);
 
   // Language toggle (en / hi)
   const [lang, setLang] = useState<"en" | "hi">("en");
@@ -380,7 +380,7 @@ export default function Home() {
       setTotpCode("");
       setTwoFactorRequired(false);
       fetchCurrentUser(data.access_token);
-    } catch (err: unknown) {
+    } catch (err: any) {
       showNotification(err.message, "error");
     }
   };
@@ -406,7 +406,7 @@ export default function Home() {
       showNotification("Account created! Please sign in.", "success");
       setPassword("");
       setIsRegisterMode(false);
-    } catch (err: unknown) {
+    } catch (err: any) {
       showNotification(err.message || "Registration failed", "error");
     }
   };
@@ -467,7 +467,7 @@ export default function Home() {
         setNewAnnotationNote("");
         fetchAnnotations(annotationDocId);
       }
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Error) showNotification(e.message, "error");
       showNotification(e.message, "error");
     }
@@ -480,7 +480,7 @@ export default function Home() {
         showNotification("Annotation deleted");
         if (annotationDocId) fetchAnnotations(annotationDocId);
       }
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e instanceof Error) showNotification(e.message, "error");
       showNotification(e.message, "error");
     }
@@ -501,7 +501,7 @@ export default function Home() {
       } else {
         throw new Error("Failed to load text.");
       }
-    } catch (err: unknown) {
+    } catch (err: any) {
       if (err instanceof Error) showNotification(err.message, "error");
       showNotification(err.message, "error");
       handleClosePreview();
@@ -841,7 +841,7 @@ export default function Home() {
                           setOnlineModeResult({ error: data.detail || "Failed to fetch eCourts data" });
                           showNotification(data.detail || "eCourts lookup failed", "error");
                         }
-                      } catch (err: unknown) {
+                      } catch (err: any) {
                         const errorMsg = err instanceof Error ? err.message : "Error";
                         setOnlineModeResult({ error: errorMsg });
                         showNotification(errorMsg, "error");
@@ -1017,7 +1017,7 @@ export default function Home() {
                 </button>
               )}
               <button 
-                onClick={fetchSystemStatus}
+                onClick={(e) => { e.preventDefault(); fetchSystemStatus(); }}
                 className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-zinc-400 hover:text-white transition duration-200 cursor-pointer border border-zinc-900 rounded-lg hover:bg-zinc-900/50"
               >
                 <RefreshCw className="w-3 h-3" />
@@ -1039,17 +1039,17 @@ export default function Home() {
                 selectedClient={selectedClient}
                 setSelectedClient={setSelectedClient}
                 matters={matters}
-                setMatters={setMatters}
+                setMatters={() => {}}
                 selectedMatter={selectedMatter}
                 setSelectedMatter={setSelectedMatter}
                 schedules={schedules}
-                setSchedules={setSchedules}
+                setSchedules={() => {}}
                 documents={documents}
-                setDocuments={setDocuments}
-                fetchMatters={fetchMatters}
-                fetchSchedules={fetchSchedules}
-                fetchDocuments={fetchDocuments}
-                fetchSystemStatus={fetchSystemStatus}
+                setDocuments={() => {}}
+                fetchMatters={() => { fetchMatters(); return Promise.resolve(); }}
+                fetchSchedules={() => { fetchSchedules(); return Promise.resolve(); }}
+                fetchDocuments={() => { fetchDocuments(); return Promise.resolve(); }}
+                fetchSystemStatus={() => { fetchSystemStatus(); return Promise.resolve(); }}
                 handleViewDocumentText={handleViewDocumentText}
               />
             )}
@@ -1060,7 +1060,7 @@ export default function Home() {
                 fetchWithAuth={fetchWithAuth}
                 showNotification={showNotification}
                 clients={clients}
-                fetchClients={fetchClients}
+                fetchClients={() => { fetchClients(); return Promise.resolve(); }}
               />
             )}
 
@@ -1153,11 +1153,11 @@ export default function Home() {
                 showNotification={showNotification}
                 currentUser={currentUser}
                 systemStatus={systemStatus}
-                fetchSystemStatus={fetchSystemStatus}
-                setClients={setClients}
-                setMatters={setMatters}
-                setSchedules={setSchedules}
-                setDocuments={setDocuments}
+                fetchSystemStatus={() => { fetchSystemStatus(); return Promise.resolve(); }}
+                setClients={() => {}}
+                setMatters={() => {}}
+                setSchedules={() => {}}
+                setDocuments={() => {}}
                 setSelectedClient={setSelectedClient}
                 setSelectedMatter={setSelectedMatter}
               />
