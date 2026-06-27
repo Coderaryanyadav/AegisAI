@@ -70,7 +70,7 @@ export const OnboardingGuide: React.FC<OnboardingGuideProps> = ({
               </p>
               
               <div className="bg-zinc-950/90 border border-zinc-900 rounded-xl p-3.5 space-y-2 text-[10px] font-mono text-zinc-300">
-                <p className="text-zinc-450">// Instructions to start local Ollama service:</p>
+                <p className="text-zinc-450">{"// Instructions to start local Ollama service:"}</p>
                 <p>1. Download & Install Ollama from <a href="https://ollama.com" target="_blank" rel="noreferrer" className="text-violet-400 underline">https://ollama.com</a></p>
                 <p>2. Open your system shell and verify execution:</p>
                 <p className="text-amber-400 select-all">ollama serve</p>
@@ -104,9 +104,9 @@ export const OnboardingGuide: React.FC<OnboardingGuideProps> = ({
               </p>
 
               <div className="bg-zinc-950/90 border border-zinc-900 rounded-xl p-3.5 space-y-2 text-[10px] font-mono text-zinc-300">
-                <p className="text-zinc-450"># Command to download deepseek reasoning model:</p>
+                <p className="text-zinc-450">{"# Command to download deepseek reasoning model:"}</p>
                 <p className="text-amber-400 select-all">ollama pull deepseek-r1:8b</p>
-                <p className="text-zinc-450"># Command to download mistral model:</p>
+                <p className="text-zinc-450">{"# Command to download mistral model:"}</p>
                 <p className="text-amber-400 select-all">ollama pull mistral:latest</p>
               </div>
 

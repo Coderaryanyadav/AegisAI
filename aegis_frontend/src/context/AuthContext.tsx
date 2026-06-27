@@ -14,17 +14,13 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-    const [token, setTokenState] = useState<string>("");
-    const [currentUser, setCurrentUser] = useState<User | null>(null);
-
-    useEffect(() => {
+    const [token, setTokenState] = useState<string>(() => {
         if (typeof window !== "undefined") {
-            const savedToken = localStorage.getItem("aegis_token");
-            if (savedToken) {
-                setTokenState(savedToken);
-            }
+            return localStorage.getItem("aegis_token") || "";
         }
-    }, []);
+        return "";
+    });
+    const [currentUser, setCurrentUser] = useState<User | null>(null);
 
     const setToken = (newToken: string) => {
         setTokenState(newToken);

@@ -40,14 +40,7 @@ export function BillingTab({
   const [timerSeconds, setTimerSeconds] = useState(0);
   const timerRef = useRef<any>(null);
 
-  useEffect(() => {
-    setBillingMatterId(null);
-    setTimeEntries([]);
-    setInvoices([]);
-    if (selectedClient) {
-      fetchInvoices();
-    }
-  }, [selectedClient]);
+
 
   // Billing timer tick
   useEffect(() => {
@@ -71,7 +64,7 @@ export function BillingTab({
 
   const fetchTimeEntries = async (matterId: number) => {
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/billing/time-entries?matter_id=${matterId}`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/billing/time-entries?matter_id=${matterId}`);
       if (res.ok) setTimeEntries(await res.json());
     } catch {}
   };
@@ -79,7 +72,7 @@ export function BillingTab({
   const handleAddTimeEntry = async () => {
     if (!billingMatterId || !newTimeEntry.description) return;
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/billing/time-entry`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/billing/time-entry`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ matter_id: billingMatterId, ...newTimeEntry })
@@ -97,7 +90,7 @@ export function BillingTab({
   const handleDeleteTimeEntry = async (id: number) => {
     if (!confirm("Are you sure you want to delete this time entry?")) return;
     try {
-      await fetchWithAuth(`${API_BASE}/api/billing/time-entry/${id}`, { method: "DELETE" });
+      await fetchWithAuth(`${API_BASE}/api/v1/billing/time-entry/${id}`, { method: "DELETE" });
       showNotification("Time entry deleted.", "success");
       if (billingMatterId) fetchTimeEntries(billingMatterId);
     } catch (e: any) {
@@ -109,7 +102,7 @@ export function BillingTab({
     if (!billingMatterId || !selectedClient) return;
     setIsCreatingInvoice(true);
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/billing/invoice`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/billing/invoice`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client_id: selectedClient.id, matter_id: billingMatterId })
@@ -135,7 +128,7 @@ export function BillingTab({
 
   const fetchInvoices = async () => {
     try {
-      const url = selectedClient ? `${API_BASE}/api/billing/invoices?client_id=${selectedClient.id}` : `${API_BASE}/api/billing/invoices`;
+      const url = selectedClient ? `${API_BASE}/api/v1/billing/invoices?client_id=${selectedClient.id}` : `${API_BASE}/api/v1/billing/invoices`;
       const res = await fetchWithAuth(url);
       if (res.ok) setInvoices(await res.json());
     } catch {}
@@ -161,6 +154,15 @@ export function BillingTab({
   };
 
   const totalBillableAmount = timeEntries.reduce((s, e) => s + parseFloat(e.amount || 0), 0);
+
+  useEffect(() => {
+    setBillingMatterId(null);
+    setTimeEntries([]);
+    setInvoices([]);
+    if (selectedClient) {
+      fetchInvoices();
+    }
+  }, [selectedClient]);
 
   return (
     <div className="space-y-6 animate-fade-in">

@@ -123,102 +123,6 @@ async def update_matter(id: int, matter_in: MatterUpdate, db: AsyncSession = Dep
     await log_audit_trail(db, current_user.email, "UPDATE", "matters", str(id))
     return matter
 
-@router.post("/matters/{id}/sync-ecourts")
-async def sync_ecourts_cnr(id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
-    stmt = select(Matter).filter(Matter.id == id)
-    res = await db.execute(stmt)
-    matter = res.scalars().first()
-    if not matter:
-        raise HTTPException(status_code=404, detail="Matter not found")
-    if not matter.cnr_number:
-        raise HTTPException(status_code=400, detail="No CNR number registered for this matter")
-    if matter.is_locked:
-        return {"status": "locked", "message": "This matter's data has been locked locally to prevent remote tampering or hijacking. (eCourts Sync Simulation Mode)", "is_simulation": True}
-    
-    # In simulation mode, we bypass external DNS checks to prevent metadata leakage.
-    is_online = True
-
-    if not is_online:
-        raise HTTPException(
-            status_code=503,
-            detail="Offline mode active. Internet connection required to sync with the eCourts platform. Please go online and try again."
-        )
-    from aegis_backend.services.matter_service import MatterService
-    result = await MatterService.sync_ecourts_cnr(db, matter)
-    await log_audit_trail(db, current_user.email, "ECOURTS_SYNC", "matters", str(id), f"CNR: {matter.cnr_number} synced and locked.")
-    return result
-
-@router.get("/ecourts/lookup")
-async def ecourts_lookup(cnr: str, current_user: User = Depends(verify_lawyer_or_admin), db: AsyncSession = Depends(get_db)):
-    if not cnr or len(cnr.strip()) < 6:
-        raise HTTPException(status_code=400, detail="A valid CNR number is required (min 6 characters)")
-
-    cnr = cnr.strip().upper()
-
-    # In simulation mode, we bypass external DNS checks to prevent metadata leakage.
-    is_online = True
-
-    if not is_online:
-        raise HTTPException(
-            status_code=503,
-            detail="No internet connection detected. Cannot reach eCourts platform. Please check your network."
-        )
-
-    judges = [
-        "Hon'ble Mr. Justice D. Y. Chandrachud",
-        "Hon'ble Mrs. Justice Hima Kohli",
-        "Hon'ble Mr. Justice Sanjiv Khanna",
-        "Hon'ble Mr. Justice B. R. Gavai",
-        "Hon'ble Ms. Justice Indira Banerjee"
-    ]
-    status_choices = ["Open", "Pending Hearing", "Reserved for Judgment", "Disposed"]
-    courts = [
-        "Supreme Court of India",
-        "High Court of Bombay",
-        "High Court of Delhi",
-        "District Court of Saket, New Delhi",
-        "City Civil Court, Mumbai",
-        "High Court of Madras"
-    ]
-    case_types = ["Civil Suit", "Criminal Appeal", "Writ Petition", "Special Leave Petition", "Company Matter"]
-    petitioners = ["State of Maharashtra", "Union of India", "Petitioner Corp Pvt. Ltd.", "M/s Bharat Enterprises"]
-    respondents = ["Respondent Industries Ltd.", "State Bank of India", "Income Tax Department"]
-
-    cnr_seed = sum(ord(c) for c in cnr)
-    rng = random.Random(cnr_seed)
-
-    fetched_court = rng.choice(courts)
-    fetched_judge = rng.choice(judges)
-    fetched_status = rng.choice(status_choices)
-    fetched_case_type = rng.choice(case_types)
-    fetched_petitioner = rng.choice(petitioners)
-    fetched_respondent = rng.choice(respondents)
-    fetched_case_number = f"CS No. {rng.randint(100, 9999)}/{datetime.now().year - rng.randint(0, 5)}"
-    next_date = (datetime.now() + timedelta(days=rng.randint(5, 60))).strftime("%d %B %Y")
-    filed_date = (datetime.now() - timedelta(days=rng.randint(30, 1800))).strftime("%d %B %Y")
-
-    await log_audit_trail(db, current_user.email, "ECOURTS_LOOKUP", "ecourts", cnr, f"Online lookup for CNR {cnr}")
-
-    return {
-        "cnr": cnr,
-        "case_title": f"{fetched_petitioner} vs. {fetched_respondent}",
-        "case_number": fetched_case_number,
-        "case_type": fetched_case_type,
-        "court": fetched_court,
-        "judge": fetched_judge,
-        "status": fetched_status,
-        "next_date": next_date,
-        "filing_date": filed_date,
-        "is_simulation": True,
-        "raw_text": (
-            f"Case No: {fetched_case_number} | CNR: {cnr} (SIMULATION)\n"
-            f"Before: {fetched_judge}\n"
-            f"Court: {fetched_court}\n"
-            f"Parties: {fetched_petitioner} vs. {fetched_respondent}\n"
-            f"Type: {fetched_case_type} | Status: {fetched_status}\n"
-            f"Filed: {filed_date} | Next Hearing: {next_date}"
-        )
-    }
 
 @router.post("/matters/check-conflict")
 async def check_legal_conflict(req: ConflictCheckRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
@@ -232,18 +136,37 @@ async def check_legal_conflict(req: ConflictCheckRequest, db: AsyncSession = Dep
     if not clean_client or not clean_opponent:
         raise HTTPException(status_code=400, detail="Client name and Opponent name are required.")
 
-    stmt_clients = select(Client)
+    from sqlalchemy import or_
+    
+    clean_client_wildcard = f"%{clean_client}%"
+    clean_opponent_wildcard = f"%{clean_opponent}%"
+    
+    # 1. Check if the opponent matches any active client names (DIRECT CONFLICT)
+    stmt_clients = select(Client).filter(
+        or_(
+            Client.name.ilike(clean_opponent_wildcard),
+            func.upper(clean_opponent).like(func.concat('%', func.upper(Client.name), '%'))
+        )
+    )
     res_clients = await db.execute(stmt_clients)
     clients = res_clients.scalars().all()
     for c in clients:
-        if clean_opponent in c.name.upper() or c.name.upper() in clean_opponent:
-            conflict_detected = True
-            severity = "high"
-            reasons.append(f"DIRECT CONFLICT: Opponent '{req.opponent_name}' matches active client folder '{c.name}' (Client ID: {c.id}).")
+        conflict_detected = True
+        severity = "high"
+        reasons.append(f"DIRECT CONFLICT: Opponent '{req.opponent_name}' matches active client folder '{c.name}' (Client ID: {c.id}).")
 
-    stmt_matters = select(Matter).options(selectinload(Matter.client))
+    # 2. Check matters
+    stmt_matters = select(Matter).options(selectinload(Matter.client)).filter(
+        or_(
+            Matter.opponent_name.ilike(clean_client_wildcard),
+            func.upper(clean_client).like(func.concat('%', func.upper(Matter.opponent_name), '%')),
+            Matter.client.has(Client.name.ilike(clean_opponent_wildcard)),
+            Matter.client.has(func.upper(clean_opponent).like(func.concat('%', func.upper(Client.name), '%')))
+        )
+    )
     res_matters = await db.execute(stmt_matters)
     matters = res_matters.scalars().all()
+    
     for m in matters:
         if m.opponent_name:
             clean_matter_opp = m.opponent_name.strip().upper()

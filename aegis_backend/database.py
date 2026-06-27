@@ -16,7 +16,7 @@ os.makedirs(os.path.join(AEGIS_DIR, "vault"), exist_ok=True)
 os.makedirs(os.path.join(AEGIS_DIR, "backups"), exist_ok=True)
 
 DB_PATH = os.path.join(AEGIS_DIR, "aegis_ai.db")
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://aegis:aegis_password@localhost:5432/aegis_ai")
+DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{DB_PATH}")
 
 engine_args = {}
 if DATABASE_URL.startswith("sqlite"):
@@ -45,7 +45,9 @@ class Base(DeclarativeBase):
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
-if DATABASE_URL.startswith("sqlite"):
+USE_POSTGRES = os.environ.get("USE_POSTGRES", "false").lower() == "true"
+
+if DATABASE_URL.startswith("sqlite") and not USE_POSTGRES:
     async_db_url = DATABASE_URL
     if async_db_url.startswith("sqlite://") and not async_db_url.startswith("sqlite+aiosqlite://"):
         async_db_url = async_db_url.replace("sqlite://", "sqlite+aiosqlite://")
@@ -54,7 +56,7 @@ if DATABASE_URL.startswith("sqlite"):
         connect_args={"check_same_thread": False}
     )
 else:
-    async_db_url = DATABASE_URL
+    async_db_url = os.environ.get("POSTGRES_URL", DATABASE_URL)
     if async_db_url.startswith("postgresql://") and not async_db_url.startswith("postgresql+"):
         async_db_url = async_db_url.replace("postgresql://", "postgresql+asyncpg://")
     async_engine = create_async_engine(
@@ -65,6 +67,29 @@ else:
     )
 
 AsyncSessionLocal = async_sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=async_engine, class_=AsyncSession)
+
+DATABASE_URL_RO = os.environ.get("DATABASE_URL_RO", DATABASE_URL)
+if DATABASE_URL_RO.startswith("sqlite"):
+    async_db_url_ro = DATABASE_URL_RO
+    if async_db_url_ro.startswith("sqlite://") and not async_db_url_ro.startswith("sqlite+aiosqlite://"):
+        async_db_url_ro = async_db_url_ro.replace("sqlite://", "sqlite+aiosqlite://")
+    async_engine_ro = create_async_engine(
+        async_db_url_ro,
+        connect_args={"check_same_thread": False}
+    )
+else:
+    async_db_url_ro = DATABASE_URL_RO
+    if async_db_url_ro.startswith("postgresql://") and not async_db_url_ro.startswith("postgresql+"):
+        async_db_url_ro = async_db_url_ro.replace("postgresql://", "postgresql+asyncpg://")
+    async_engine_ro = create_async_engine(
+        async_db_url_ro,
+        pool_size=20,
+        max_overflow=40,
+        pool_recycle=3600
+    )
+
+AsyncSessionLocalRO = async_sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=async_engine_ro, class_=AsyncSession)
+
 
 
 # Cryptographic Master Key derivation (stores salt/key securely in OS keyring or fallback local file)
@@ -469,5 +494,13 @@ async def get_db():
             yield db
         except Exception:
             await db.rollback()
+            raise
+
+async def get_db_ro():
+    async with AsyncSessionLocalRO() as db_ro:
+        try:
+            yield db_ro
+        except Exception:
+            await db_ro.rollback()
             raise
 

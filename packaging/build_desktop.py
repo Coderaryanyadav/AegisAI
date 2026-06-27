@@ -46,7 +46,13 @@ def compile_app():
         "bcrypt",
         "cryptography",
         "fitz",
-        "pytesseract"
+        "pytesseract",
+        "pg8000",
+        "asyncpg",
+        "sqlalchemy.dialects.postgresql.pg8000",
+        "sqlalchemy.dialects.postgresql.asyncpg",
+        "aiosqlite",
+        "sqlalchemy.dialects.sqlite.aiosqlite"
     ]
     
     args = [

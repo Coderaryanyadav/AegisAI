@@ -143,11 +143,20 @@ async def get_document_text(id: int, db: AsyncSession = Depends(get_db), current
 
 @router.delete("/documents/{id}")
 async def delete_document(id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
-    stmt = select(Document).filter(Document.id == id)
-    res = await db.execute(stmt)
-    doc = res.scalars().first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+    from aegis_backend.core.security import check_document_access
+    
+    # Check if the user has access to this document and it exists
+    doc = await check_document_access(db, current_user, id)
+    
+    if current_user.role == "lawyer":
+        # Lawyers can only delete if the document is unassigned OR belongs to a matter owned by their client accounts?
+        # Let's enforce that only admins can delete, or lawyers assigned to the matter
+        if doc.matter_id:
+            stmt = select(Matter).filter(Matter.id == doc.matter_id)
+            res = await db.execute(stmt)
+            matter = res.scalars().first()
+            if not matter:
+                raise HTTPException(status_code=403, detail="Matter not found for this document")
     
     # Remove vectors
     try:

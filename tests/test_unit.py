@@ -139,7 +139,7 @@ def test_must_change_password_enforcement():
         
     try:
         # 1. Login with seeded user must be blocked/warned
-        response = client.post("/api/auth/token", data={
+        response = client.post("/api/v1/auth/token", data={
             "username": "admin@legalai.local",
             "password": "adminpassword123"
         })
@@ -151,7 +151,7 @@ def test_must_change_password_enforcement():
         
         # 2. Change password using the authenticated endpoint
         change_res = client.post(
-            "/api/auth/change-default-password",
+            "/api/v1/auth/change-default-password",
             headers={"Authorization": f"Bearer {token}"},
             data={
                 "current_password": "adminpassword123",
@@ -166,7 +166,7 @@ def test_must_change_password_enforcement():
         assert test_user.must_change_password is False
         
         # 3. Successful login with new password
-        login_res = client.post("/api/auth/token", data={
+        login_res = client.post("/api/v1/auth/token", data={
             "username": "admin@legalai.local",
             "password": "NewBrutalSecurePassword123!"
         })
@@ -337,7 +337,7 @@ def test_user_management_and_refresh():
         db.commit()
         
         # Get admin token
-        admin_login = client.post("/api/auth/token", data={
+        admin_login = client.post("/api/v1/auth/token", data={
             "username": "admin_mgt@legalai.local",
             "password": "AdminSecurePassword123!"
         })
@@ -346,7 +346,7 @@ def test_user_management_and_refresh():
         admin_headers = {"Authorization": f"Bearer {admin_token}"}
         
         # Get lawyer token
-        lawyer_login = client.post("/api/auth/token", data={
+        lawyer_login = client.post("/api/v1/auth/token", data={
             "username": "lawyer_mgt@legalai.local",
             "password": "LawyerSecurePassword123!"
         })
@@ -356,26 +356,26 @@ def test_user_management_and_refresh():
         lawyer_headers = {"Authorization": f"Bearer {lawyer_token}"}
         
         # Test Refresh Endpoint
-        refresh_res = client.post("/api/auth/refresh", data={"refresh_token": lawyer_refresh_token})
+        refresh_res = client.post("/api/v1/auth/refresh", data={"refresh_token": lawyer_refresh_token})
         assert refresh_res.status_code == 200
         assert "access_token" in refresh_res.json()
         
         # Test GET /users (admin-only)
-        users_res = client.get("/api/users", headers=admin_headers)
+        users_res = client.get("/api/v1/users", headers=admin_headers)
         assert users_res.status_code == 200
         assert any(u["email"] == "lawyer_mgt@legalai.local" for u in users_res.json())
         
         # Test GET /users with lawyer role (should be 403 Forbidden)
-        users_res_lawyer = client.get("/api/users", headers=lawyer_headers)
+        users_res_lawyer = client.get("/api/v1/users", headers=lawyer_headers)
         assert users_res_lawyer.status_code == 403
         
         # Test PUT /users/{id}/role (admin-only)
-        role_res = client.put(f"/api/users/{lawyer_user.id}/role", data={"role": "auditor"}, headers=admin_headers)
+        role_res = client.put(f"/api/v1/users/{lawyer_user.id}/role", data={"role": "auditor"}, headers=admin_headers)
         assert role_res.status_code == 200
         assert role_res.json()["role"] == "auditor"
         
         # Test PUT /users/{id}/disable (admin-only)
-        disable_res = client.put(f"/api/users/{lawyer_user.id}/disable", data={"is_disabled": True}, headers=admin_headers)
+        disable_res = client.put(f"/api/v1/users/{lawyer_user.id}/disable", data={"is_disabled": True}, headers=admin_headers)
         assert disable_res.status_code == 200
         assert disable_res.json()["is_disabled"] is True
         
@@ -383,7 +383,7 @@ def test_user_management_and_refresh():
         db.query(AuthRateLimit).delete()
         db.commit()
         
-        login_disabled = client.post("/api/auth/token", data={
+        login_disabled = client.post("/api/v1/auth/token", data={
             "username": "lawyer_mgt@legalai.local",
             "password": "LawyerSecurePassword123!"
         })

@@ -21,7 +21,7 @@ def run_hardcore_tests():
     
     # Check server availability
     try:
-        httpx.get(f"{API_BASE}/api/system/status", timeout=2.0)
+        httpx.get(f"{API_BASE}/api/v1/system/status", timeout=2.0)
     except Exception:
         print(f"🔴 ERROR: Backend server is not running on {API_BASE}.")
         print("Please start the backend before running the tests:")
@@ -36,7 +36,7 @@ def run_hardcore_tests():
     test_email = f"test_advocate_{int(time.time())}@firm.com"
     test_password = "SecurePassword123!"
     try:
-        res = client.post("/api/auth/register", json={
+        res = client.post("/api/v1/auth/register", json={
             "email": test_email,
             "password": test_password,
             "role": "lawyer"
@@ -50,7 +50,7 @@ def run_hardcore_tests():
 
     # Test 2: Login / Token Retrieve
     try:
-        res = client.post("/api/auth/token", data={
+        res = client.post("/api/v1/auth/token", data={
             "username": test_email,
             "password": test_password
         })
@@ -68,17 +68,17 @@ def run_hardcore_tests():
 
     # Test 3: Get Profile Profile Info (Auth Me)
     try:
-        res = client.get("/api/auth/me", headers=headers)
+        res = client.get("/api/v1/auth/me", headers=headers)
         passed = res.status_code == 200 and res.json()["email"] == test_email
         details = f"Fetched email match: {res.json().get('email')}" if passed else res.text
-        log_test("Auth - Get profile (/api/auth/me)", passed, details)
+        log_test("Auth - Get profile (/api/v1/auth/me)", passed, details)
     except Exception as e:
         log_test("Auth - Get profile", False, str(e))
 
     # Test 4: Configure Custom Firm Settings (Letterhead & Logo)
     mock_logo_b64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAABGdBTUEAALGPC/xhBQAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9sJEw0tKnGJF4UAAAAIdEVYdENvbW1lbnQA9syWvwAAADFJREFUGFdj/P//PwM2wMRACQhGKgApRoqBipFiwKqYKAbqY6IYMKMmksFIMmBGTSQDAOzZBgv54H68AAAAAElFTkSuQmCC"
     try:
-        res = client.post("/api/user/firm-settings", headers=headers, json={
+        res = client.post("/api/v1/user/firm-settings", headers=headers, json={
             "firm_name": "Chambers of Supreme Advocate",
             "firm_logo": mock_logo_b64
         })
@@ -90,7 +90,7 @@ def run_hardcore_tests():
 
     # Test 5: Verify settings persisted on /auth/me
     try:
-        res = client.get("/api/auth/me", headers=headers)
+        res = client.get("/api/v1/auth/me", headers=headers)
         data = res.json()
         passed = data.get("firm_name") == "Chambers of Supreme Advocate" and data.get("firm_logo") == mock_logo_b64
         details = f"Persisted Name: {data.get('firm_name')}" if passed else "Data mismatch on settings verify"
@@ -100,7 +100,7 @@ def run_hardcore_tests():
 
     # Test 6: 2FA Status check
     try:
-        res = client.get("/api/2fa/status", headers=headers)
+        res = client.get("/api/v1/2fa/status", headers=headers)
         passed = res.status_code == 200 and res.json()["enabled"] is False
         details = f"Enabled state: {res.json().get('enabled')}" if passed else res.text
         log_test("MFA - 2FA check (Default Disabled)", passed, details)
@@ -109,7 +109,7 @@ def run_hardcore_tests():
 
     # Test 7: 2FA Setup generation
     try:
-        res = client.post("/api/2fa/setup", headers=headers)
+        res = client.post("/api/v1/2fa/setup", headers=headers)
         passed = res.status_code == 200 and "secret" in res.json() and "qr_code_base64" in res.json()
         details = f"TOTP Secret Generated: {res.json().get('secret')[:8]}..." if passed else f"Status {res.status_code}: {res.text}"
         log_test("MFA - 2FA Secret setup generation", passed, details)
@@ -119,7 +119,7 @@ def run_hardcore_tests():
     # Test 8: Client CRM Creation
     client_id = None
     try:
-        res = client.post("/api/clients", headers=headers, json={
+        res = client.post("/api/v1/clients", headers=headers, json={
             "name": "Reliance Corporate Industries",
             "email": "legal@reliance.com",
             "phone": "+91-9876543210",
@@ -139,7 +139,7 @@ def run_hardcore_tests():
     matter_id = None
     test_cnr = "DLHC010005552026"
     try:
-        res = client.post("/api/matters", headers=headers, json={
+        res = client.post("/api/v1/matters", headers=headers, json={
             "client_id": client_id,
             "title": "Reliance Patents Infringement Litigation",
             "case_number": "WP-1254/2026",
@@ -163,7 +163,7 @@ def run_hardcore_tests():
 
     # Test 10: eCourts CNR Sync and Lock Verification
     try:
-        res = client.post(f"/api/matters/{matter_id}/sync-ecourts", headers=headers)
+        res = client.post(f"/api/v1/matters/{matter_id}/sync-ecourts", headers=headers)
         passed = res.status_code == 200 and "status" in res.json()
         if passed:
             data = res.json()
@@ -176,7 +176,7 @@ def run_hardcore_tests():
 
     # Test 11: eCourts Lock Check (Verifying that subsequent calls block modification)
     try:
-        res = client.post(f"/api/matters/{matter_id}/sync-ecourts", headers=headers)
+        res = client.post(f"/api/v1/matters/{matter_id}/sync-ecourts", headers=headers)
         passed = res.status_code == 200 and res.json().get("status") == "locked"
         details = res.json().get("message") if passed else res.text
         log_test("eCourts - Data lock verification", passed, details)
@@ -186,7 +186,7 @@ def run_hardcore_tests():
     # Test 12: Billing Time Logging
     entry_id = None
     try:
-        res = client.post("/api/billing/time-entry", headers=headers, json={
+        res = client.post("/api/v1/billing/time-entry", headers=headers, json={
             "matter_id": matter_id,
             "description": "Drafted patent arguments and analyzed opponent statement",
             "hours": "2.5",
@@ -205,7 +205,7 @@ def run_hardcore_tests():
 
     # Test 13: Invoice Generation with GST Calculation Check
     try:
-        res = client.post("/api/billing/invoice", headers=headers, json={
+        res = client.post("/api/v1/billing/invoice", headers=headers, json={
             "client_id": client_id,
             "matter_id": matter_id,
             "notes": "Litigation drafting services."
@@ -226,7 +226,7 @@ def run_hardcore_tests():
 
     # Test 14: Analytics Summary Endpoint
     try:
-        res = client.get("/api/analytics/summary", headers=headers)
+        res = client.get("/api/v1/analytics/summary", headers=headers)
         passed = res.status_code == 200 and "total_matters" in res.json()
         if passed:
             data = res.json()
@@ -239,7 +239,7 @@ def run_hardcore_tests():
 
     # Test 15: Clean Up Client & Matter
     try:
-        res = client.delete(f"/api/clients/{client_id}", headers=headers)
+        res = client.delete(f"/api/v1/clients/{client_id}", headers=headers)
         passed = res.status_code == 200
         details = "Client and cascaded matter deleted successfully" if passed else res.text
         log_test("Cleanup - Cascade remove testing assets", passed, details)

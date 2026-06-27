@@ -35,17 +35,7 @@ export function SettingsTab({
   const [firmLogo, setFirmLogo] = useState(currentUser?.firm_logo || "");
   const [gstRate, setGstRate] = useState(currentUser?.gst_rate !== undefined ? currentUser.gst_rate : 18.0);
 
-  useEffect(() => {
-    check2FAStatus();
-  }, []);
 
-  useEffect(() => {
-    if (currentUser) {
-      setFirmName(currentUser.firm_name || "");
-      setFirmLogo(currentUser.firm_logo || "");
-      setGstRate(currentUser.gst_rate !== undefined ? currentUser.gst_rate : 18.0);
-    }
-  }, [currentUser]);
 
   const check2FAStatus = async () => {
     try {
@@ -113,6 +103,18 @@ export function SettingsTab({
       showNotification(e.message, "error");
     }
   };
+
+  useEffect(() => {
+    check2FAStatus();
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      setFirmName(currentUser.firm_name || "");
+      setFirmLogo(currentUser.firm_logo || "");
+      setGstRate(currentUser.gst_rate !== undefined ? currentUser.gst_rate : 18.0);
+    }
+  }, [currentUser]);
 
   return (
     <div className="space-y-6 animate-fade-in">

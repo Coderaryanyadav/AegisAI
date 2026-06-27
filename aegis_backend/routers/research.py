@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from aegis_backend.database import get_db, User, Matter, Document, Schedule, BareActSection, Client
+from aegis_backend.database import get_db, get_db_ro, User, Matter, Document, Schedule, BareActSection, Client
 from aegis_backend.schemas.models import (
     ResearchQuery, ConflictCheckRequest, FormatDraftRequest, SimplifyClauseRequest,
     FIRAnalysisRequest, PredictOutcomeRequest, VoiceTranscribeRequest
@@ -30,7 +30,7 @@ router = APIRouter(tags=["research"])
 
 
 @router.post("/research/query")
-async def query_legal_rag(req: ResearchQuery, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+async def query_legal_rag(req: ResearchQuery, db: AsyncSession = Depends(get_db), db_ro: AsyncSession = Depends(get_db_ro), current_user: User = Depends(verify_lawyer_or_admin)):
     # 1. Prompt Injection Filter
     if check_prompt_injection(req.query):
         raise HTTPException(
@@ -104,6 +104,7 @@ async def query_legal_rag(req: ResearchQuery, db: AsyncSession = Depends(get_db)
 async def query_legal_rag_stream(
     req: ResearchQuery,
     db: AsyncSession = Depends(get_db),
+    db_ro: AsyncSession = Depends(get_db_ro),
     current_user: User = Depends(verify_lawyer_or_admin)
 ):
     if check_prompt_injection(req.query):
@@ -184,7 +185,7 @@ async def query_legal_rag_stream(
     return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
 @router.get("/helper/ipc-bns")
-async def get_statutory_mapping(act: str, section: str, db: AsyncSession = Depends(get_db)):
+async def get_statutory_mapping(act: str, section: str, db_ro: AsyncSession = Depends(get_db_ro)):
     mapping = IndianLegalHelper.convert_section(act, section)
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found for the requested section.")
@@ -198,7 +199,7 @@ async def get_statutory_mapping(act: str, section: str, db: AsyncSession = Depen
             BareActSection.act == target_act,
             BareActSection.section == new_section
         )
-        res = await db.execute(stmt)
+        res = await db_ro.execute(stmt)
         sect_data = res.scalars().first()
         if sect_data:
             full_text = sect_data.content
@@ -302,9 +303,9 @@ async def parse_cause_list(
     }
 
 @router.post("/analyze/extract-timeline")
-async def extract_case_timeline(document_id: int, model_name: str = "mistral:latest", db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+async def extract_case_timeline(document_id: int, model_name: str = "mistral:latest", db_ro: AsyncSession = Depends(get_db_ro), current_user: User = Depends(verify_lawyer_or_admin)):
     stmt = select(Document).filter(Document.id == document_id)
-    res = await db.execute(stmt)
+    res = await db_ro.execute(stmt)
     doc = res.scalars().first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -338,9 +339,9 @@ async def extract_case_timeline(document_id: int, model_name: str = "mistral:lat
     }
 
 @router.post("/analyze/facts")
-async def extract_case_facts(document_id: int, model_name: str = "mistral:latest", db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+async def extract_case_facts(document_id: int, model_name: str = "mistral:latest", db_ro: AsyncSession = Depends(get_db_ro), current_user: User = Depends(verify_lawyer_or_admin)):
     stmt = select(Document).filter(Document.id == document_id)
-    res = await db.execute(stmt)
+    res = await db_ro.execute(stmt)
     doc = res.scalars().first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -375,9 +376,9 @@ async def extract_case_facts(document_id: int, model_name: str = "mistral:latest
     }
 
 @router.post("/audit/risk-scan")
-async def scan_contract_risks(document_id: int, model_name: str = "mistral:latest", db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+async def scan_contract_risks(document_id: int, model_name: str = "mistral:latest", db_ro: AsyncSession = Depends(get_db_ro), current_user: User = Depends(verify_lawyer_or_admin)):
     stmt = select(Document).filter(Document.id == document_id)
-    res = await db.execute(stmt)
+    res = await db_ro.execute(stmt)
     doc = res.scalars().first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -411,13 +412,13 @@ async def scan_contract_risks(document_id: int, model_name: str = "mistral:lates
     }
 
 @router.post("/audit/compare")
-async def compare_clauses(doc_id_a: int, doc_id_b: int, model_name: str = "mistral:latest", db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
+async def compare_clauses(doc_id_a: int, doc_id_b: int, model_name: str = "mistral:latest", db_ro: AsyncSession = Depends(get_db_ro), current_user: User = Depends(verify_lawyer_or_admin)):
     stmt_a = select(Document).filter(Document.id == doc_id_a)
-    res_a = await db.execute(stmt_a)
+    res_a = await db_ro.execute(stmt_a)
     doc_a = res_a.scalars().first()
     
     stmt_b = select(Document).filter(Document.id == doc_id_b)
-    res_b = await db.execute(stmt_b)
+    res_b = await db_ro.execute(stmt_b)
     doc_b = res_b.scalars().first()
     if not doc_a or not doc_b:
         raise HTTPException(status_code=404, detail="One or both documents not found")
@@ -590,11 +591,11 @@ def format_legal_draft(req: FormatDraftRequest, current_user: User = Depends(ver
     return {"formatted_draft": final_text}
 
 @router.post("/analyze/fir")
-async def analyze_fir_documents(req: FIRAnalysisRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def analyze_fir_documents(req: FIRAnalysisRequest, db: AsyncSession = Depends(get_db), db_ro: AsyncSession = Depends(get_db_ro), current_user: User = Depends(get_current_user)):
     combined_text = ""
     for doc_id in req.document_ids[:5]:
         stmt = select(Document).filter(Document.id == doc_id)
-        res = await db.execute(stmt)
+        res = await db_ro.execute(stmt)
         doc = res.scalars().first()
         if doc and os.path.exists(doc.file_path):
             filename = os.path.basename(doc.file_path)

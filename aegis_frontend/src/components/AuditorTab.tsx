@@ -44,7 +44,7 @@ export function AuditorTab({
     setIsAuditing(true);
     setAuditRisks([]);
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/audit/risk-scan?document_id=${docId}&model_name=${selectedModel}`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/audit/risk-scan?document_id=${docId}&model_name=${selectedModel}`, {
         method: "POST"
       });
       if (response.ok) {
@@ -67,7 +67,7 @@ export function AuditorTab({
     setIsComparing(true);
     setCompareResults([]);
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/audit/compare?doc_id_a=${contractDocA}&doc_id_b=${contractDocB}&model_name=${selectedModel}`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/audit/compare?doc_id_a=${contractDocA}&doc_id_b=${contractDocB}&model_name=${selectedModel}`, {
         method: "POST"
       });
       if (response.ok) {
@@ -90,7 +90,7 @@ export function AuditorTab({
     setIsSimplifying(true);
     setSimplifyResult(null);
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/audit/simplify`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/audit/simplify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clause_text: simplifyClauseText, model_name: selectedModel })

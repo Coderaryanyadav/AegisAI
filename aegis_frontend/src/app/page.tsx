@@ -277,40 +277,15 @@ export default function Home() {
   };
 
   // Language setup
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("aegis_lang");
-      if (saved === "hi") setLang("hi");
-    }
-  }, []);
 
   // Sync activeTab limits under RBAC
-  useEffect(() => {
-    if (currentUser) {
-      const role = currentUser.role || "lawyer";
-      const allowed = ALLOWED_TABS[role] || ALLOWED_TABS.lawyer;
-      if (!allowed.includes(activeTab)) {
-        setActiveTab(allowed[0]);
-      }
-    }
-  }, [currentUser, activeTab]);
 
   // Polling is now handled by React Query refetchInterval above
 
   // Request notifications setup
-  useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-  }, []);
 
   // Dependencies for selected entities are now handled dynamically by useQuery's queryKey.
   // Initialization
-  useEffect(() => {
-    if (token) {
-      fetchCurrentUser(token);
-    }
-  }, [token]);
 
   const showNotification = (message: string, type: "info" | "success" | "error" | "warning" = "info") => {
     if (notificationTimeoutRef.current) {
@@ -551,7 +526,36 @@ export default function Home() {
 
   // Auth Guard
   if (!token) {
-    return (
+    useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("aegis_lang");
+      if (saved === "hi") setLang("hi");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      const role = currentUser.role || "lawyer";
+      const allowed = ALLOWED_TABS[role] || ALLOWED_TABS.lawyer;
+      if (!allowed.includes(activeTab)) {
+        setActiveTab(allowed[0]);
+      }
+    }
+  }, [currentUser, activeTab]);
+
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (token) {
+      fetchCurrentUser(token);
+    }
+  }, [token]);
+
+  return (
       <div className="min-h-screen flex items-center justify-center relative p-4 bg-[#030303] overflow-hidden bg-radial-glow">
         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-zinc-800/10 opacity-30 blur-[130px]" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-zinc-800/15 opacity-20 blur-[130px]" />
@@ -634,6 +638,35 @@ export default function Home() {
       </div>
     );
   }
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("aegis_lang");
+      if (saved === "hi") setLang("hi");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      const role = currentUser.role || "lawyer";
+      const allowed = ALLOWED_TABS[role] || ALLOWED_TABS.lawyer;
+      if (!allowed.includes(activeTab)) {
+        setActiveTab(allowed[0]);
+      }
+    }
+  }, [currentUser, activeTab]);
+
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (token) {
+      fetchCurrentUser(token);
+    }
+  }, [token]);
 
   return (
     <ErrorBoundary>

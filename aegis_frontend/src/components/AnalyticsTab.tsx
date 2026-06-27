@@ -15,9 +15,6 @@ export function AnalyticsTab({
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
-  useEffect(() => {
-    fetchAnalytics();
-  }, []);
 
   const fetchAnalytics = async () => {
     setAnalyticsLoading(true);
@@ -32,6 +29,10 @@ export function AnalyticsTab({
       setAnalyticsLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchAnalytics();
+  }, []);
 
   return (
     <div className="space-y-6 animate-fade-in">

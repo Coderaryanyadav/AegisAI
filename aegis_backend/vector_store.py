@@ -24,6 +24,8 @@ class LocalBM25Indexer:
         # Global document frequencies for IDF calculation
         self.doc_freqs = collections.defaultdict(int)
         
+        # Precomputed IDFs
+        self.term_idfs = {}
         self._build_index()
 
     def _build_index(self):
@@ -39,11 +41,10 @@ class LocalBM25Indexer:
                 self.doc_freqs[term] += 1
                 
             self.doc_term_freqs.append(term_freq)
-
-    def calculate_idf(self, term: str) -> float:
-        df = self.doc_freqs.get(term, 0)
-        # Standard BM25 IDF formula with smoothing
-        return math.log((self.doc_count - df + 0.5) / (df + 0.5) + 1.0)
+            
+        # Precompute IDF for all unique terms
+        for term, df in self.doc_freqs.items():
+            self.term_idfs[term] = math.log((self.doc_count - df + 0.5) / (df + 0.5) + 1.0)
 
     def search(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         query_terms = query.lower().split()
@@ -59,7 +60,8 @@ class LocalBM25Indexer:
                     continue
                 
                 tf = term_freqs[term]
-                idf = self.calculate_idf(term)
+                idf = self.term_idfs.get(term, 0.0)
+
                 
                 # BM25 term weighting formula
                 numerator = tf * (self.k1 + 1)

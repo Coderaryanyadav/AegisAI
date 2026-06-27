@@ -61,24 +61,31 @@ class DocumentProcessor:
         
         if not cls.is_tesseract_available():
             doc.close()
-            raise RuntimeError(
-                "OCR is required for this scanned document, but Tesseract is not installed "
-                "or not found in the system PATH. Please install Tesseract (e.g., 'brew install tesseract' on macOS)."
-            )
+            logger.warning("OCR is required for this scanned document, but Tesseract is not installed. Falling back to empty text.")
+            return ""
 
-        ocr_text_content = []
+        ocr_text_content = ["" for _ in range(len(doc))]
         try:
-            for page_idx, page in enumerate(doc):
+            import concurrent.futures
+            
+            def process_page(page_idx):
                 logger.info(f"Running OCR on page {page_idx + 1}/{len(doc)}...")
-                # Render page to a high-resolution image (300 DPI is standard for OCR)
+                page = doc[page_idx]
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
                 image_data = pix.tobytes("png")
                 image = Image.open(io.BytesIO(image_data))
+                return pytesseract.image_to_string(image)
                 
-                # Perform OCR on the image
-                page_text = pytesseract.image_to_string(image)
-                ocr_text_content.append(page_text)
-            
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = {executor.submit(process_page, i): i for i in range(len(doc))}
+                for future in concurrent.futures.as_completed(futures):
+                    page_idx = futures[future]
+                    try:
+                        ocr_text_content[page_idx] = future.result()
+                    except Exception as e:
+                        logger.error(f"OCR failed for page {page_idx + 1}: {e}")
+                        raise
+
             full_ocr_text = "\n".join(ocr_text_content).strip()
             logger.info("Successfully extracted text using OCR.")
             return full_ocr_text

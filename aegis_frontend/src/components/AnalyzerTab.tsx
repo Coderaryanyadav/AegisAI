@@ -59,7 +59,7 @@ export function AnalyzerTab({
     setAnalyzerFacts(null);
     try {
       // Timeline
-      const timelineRes = await fetchWithAuth(`${API_BASE}/api/analyze/extract-timeline?document_id=${docId}&model_name=${selectedModel}`, {
+      const timelineRes = await fetchWithAuth(`${API_BASE}/api/v1/analyze/extract-timeline?document_id=${docId}&model_name=${selectedModel}`, {
         method: "POST"
       });
       if (timelineRes.ok) {
@@ -68,7 +68,7 @@ export function AnalyzerTab({
       }
 
       // Facts
-      const factsRes = await fetchWithAuth(`${API_BASE}/api/analyze/facts?document_id=${docId}&model_name=${selectedModel}`, {
+      const factsRes = await fetchWithAuth(`${API_BASE}/api/v1/analyze/facts?document_id=${docId}&model_name=${selectedModel}`, {
         method: "POST"
       });
       if (factsRes.ok) {
@@ -91,7 +91,7 @@ export function AnalyzerTab({
     setIsFirAnalyzing(true); 
     setFirResult(null);
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/analyze/fir`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/analyze/fir`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ document_ids: firDocIds, model_name: selectedModel })
@@ -117,7 +117,7 @@ export function AnalyzerTab({
     setIsPredicting(true); 
     setPredictResult(null);
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/analyze/predict-outcome`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/analyze/predict-outcome`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ facts: predictFacts, court: predictCourt, sections: predictSections, model_name: selectedModel })
@@ -147,7 +147,7 @@ export function AnalyzerTab({
         reader.onloadend = async () => {
           const b64 = (reader.result as string).split(",")[1];
           try {
-            const res = await fetchWithAuth(`${API_BASE}/api/analyze/transcribe`, {
+            const res = await fetchWithAuth(`${API_BASE}/api/v1/analyze/transcribe`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ audio_base64: b64, language: lang })

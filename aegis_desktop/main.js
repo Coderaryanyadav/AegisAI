@@ -207,7 +207,7 @@ function createWindow(backendPort) {
     mainWindow.webContents.openDevTools();
   } else {
     log(`Loading production static build on port ${staticServerPort} with backend port ${backendPort}`);
-    mainWindow.loadURL(`http://127.0.0.1:${staticServerPort}?backend_port=${backendPort}`);
+    mainWindow.loadURL(`http://127.0.0.1:${staticServerPort}?backend_port=${backendPort}`); mainWindow.webContents.openDevTools();
   }
 
   mainWindow.once('ready-to-show', () => {

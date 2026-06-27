@@ -10,14 +10,37 @@ API_BASE = "http://127.0.0.1:8000"
 async def login(client):
     print("[*] Logging in as admin...")
     response = await client.post(
-        f"{API_BASE}/api/auth/token",
+        f"{API_BASE}/api/v1/auth/token",
         data={"username": "admin@legalai.local", "password": "adminpassword123"}
     )
     if response.status_code != 200:
         print("Login failed! Ensure backend is running and admin/password123 is valid.")
         sys.exit(1)
-    token = response.json().get("access_token")
+        
+    data = response.json()
+    token = data.get("access_token")
     client.headers.update({"Authorization": f"Bearer {token}"})
+    
+    if data.get("must_change_password"):
+        print("[*] Changing default password...")
+        pw_response = await client.post(
+            f"{API_BASE}/api/v1/auth/change-default-password",
+            data={
+                "current_password": "adminpassword123",
+                "new_password": "StrongPassword123!"
+            }
+        )
+        if pw_response.status_code != 200:
+            print("Failed to change password:", pw_response.text)
+            sys.exit(1)
+        # Re-login with new password
+        response = await client.post(
+            f"{API_BASE}/api/v1/auth/token",
+            data={"username": "admin@legalai.local", "password": "StrongPassword123!"}
+        )
+        token = response.json().get("access_token")
+        client.headers.update({"Authorization": f"Bearer {token}"})
+        
     return token
 
 async def create_client_worker(client, worker_id, results):
@@ -30,9 +53,12 @@ async def create_client_worker(client, worker_id, results):
         "client_type": "individual"
     }
     try:
-        resp = await client.post(f"{API_BASE}/api/clients", json=payload)
+        resp = await client.post(f"{API_BASE}/api/v1/clients", json=payload)
+        if resp.status_code != 200:
+            print(f"Error {resp.status_code}: {resp.text}")
         results.append(resp.status_code)
     except Exception as e:
+        print(f"Exception: {e}")
         results.append(str(e))
 
 async def test_concurrency(client):
@@ -59,7 +85,7 @@ async def test_fuzzing(client):
     print("\n[2] Starting Malicious Fuzzing...")
     
     # Path Traversal Test
-    resp = await client.get(f"{API_BASE}/api/system/backups?file=../../../etc/passwd")
+    resp = await client.get(f"{API_BASE}/api/v1/system/backups?file=../../../etc/passwd")
     if resp.status_code in [400, 403, 422, 404]:
         print("    [PASS] Path Traversal Blocked.")
     else:
@@ -68,7 +94,7 @@ async def test_fuzzing(client):
         
     # SQL Injection / Malformed payload Test
     payload = {"name": "'; DROP TABLE clients; --", "email": "bad@bad.com"}
-    resp = await client.post(f"{API_BASE}/api/clients", json=payload)
+    resp = await client.post(f"{API_BASE}/api/v1/clients", json=payload)
     if resp.status_code == 200:
         print("    [PASS] SQLi payload neutralized by ORM.")
     else:
@@ -99,7 +125,7 @@ async def test_frontend_build():
 
 async def test_panic_wipe(client):
     print("\n[4] Triggering Secure Panic Wipe...")
-    resp = await client.post(f"{API_BASE}/api/backup/panic")
+    resp = await client.post(f"{API_BASE}/api/v1/backup/panic")
     if resp.status_code == 200:
         print("    [PASS] Panic Wipe completed successfully.")
         print("    " + resp.json().get("message", ""))

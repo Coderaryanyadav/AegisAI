@@ -33,9 +33,6 @@ export function DraftingTab({
   const [marginSpaces, setMarginSpaces] = useState("4");
   const [isFormattingDraft, setIsFormattingDraft] = useState(false);
 
-  useEffect(() => {
-    fetchDraftTemplates();
-  }, []);
 
   const fetchDraftTemplates = async () => {
     try {
@@ -110,6 +107,10 @@ export function DraftingTab({
       setIsFormattingDraft(false);
     }
   };
+
+  useEffect(() => {
+    fetchDraftTemplates();
+  }, []);
 
   return (
     <div className="space-y-6 animate-fade-in">

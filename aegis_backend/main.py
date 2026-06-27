@@ -1,4 +1,5 @@
 import os
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 import sys
 import uvicorn
 import logging
@@ -7,6 +8,7 @@ import argparse
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 # Dynamic resolution of parent directories to support compiled packaging
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,7 +29,6 @@ formatter = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(messa
 log_handler.setFormatter(formatter)
 logging.basicConfig(level=logging.INFO, handlers=[log_handler], force=True)
 logger = logging.getLogger("aegis_ai.backend")
-
 # Initialize database schemas
 init_db()
 
@@ -160,12 +161,41 @@ app = FastAPI(
     openapi_url="/openapi.json" if test_mode else None
 )
 
+# OpenTelemetry Instrumentation setup
+if os.environ.get("AEGIS_OTEL_ENABLED") == "true":
+    logger.info("Initializing OpenTelemetry Tracing...")
+    
+    # OpenTelemetry Imports
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+    from opentelemetry.sdk.resources import Resource
+    
+    resource = Resource(attributes={"service.name": "aegis_backend"})
+    provider = TracerProvider(resource=resource)
+    processor = BatchSpanProcessor(OTLPSpanExporter())
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+    FastAPIInstrumentor.instrument_app(app)
+    
+    from aegis_backend.database import engine
+    SQLAlchemyInstrumentor().instrument(
+        engine=engine,
+        enable_commenter=True,
+        commenter_options={}
+    )
+
 # Allow CORS dynamically from environment, defaulting to local Electron/Next.js frontend
 cors_origins_env = os.environ.get("AEGIS_CORS_ORIGINS")
 if cors_origins_env:
     origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
 else:
     origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.add_middleware(
     CORSMiddleware,
@@ -212,7 +242,7 @@ for r in [
     documents_router, research_router, billing_router, backup_router,
     system_router, analytics_router, annotations_router
 ]:
-    app.include_router(r, prefix="/api")
+    app.include_router(r, prefix="/api/v1")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

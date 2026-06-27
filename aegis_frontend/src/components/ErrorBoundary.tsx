@@ -36,7 +36,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="space-y-2 max-w-md">
             <h1 className="text-2xl font-bold tracking-tight text-white">Something went wrong</h1>
             <p className="text-sm text-zinc-400">
-              The application encountered an unexpected visual rendering error. Don't worry, your offline encrypted data remains safe.
+              The application encountered an unexpected visual rendering error. Don&apos;t worry, your offline encrypted data remains safe.
             </p>
           </div>
           {this.state.error && (

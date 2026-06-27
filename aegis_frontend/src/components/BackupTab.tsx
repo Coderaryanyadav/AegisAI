@@ -40,12 +40,6 @@ export function BackupTab({
   const [panicResult, setPanicResult] = useState<any>(null);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
-  useEffect(() => {
-    fetchBackupHistory();
-    if (currentUser?.role === "admin") {
-      fetchAuditLogs();
-    }
-  }, [currentUser]);
 
   const fetchBackupHistory = async () => {
     try {
@@ -157,6 +151,13 @@ export function BackupTab({
       showNotification(err.message, "error");
     }
   };
+
+  useEffect(() => {
+    fetchBackupHistory();
+    if (currentUser?.role === "admin") {
+      fetchAuditLogs();
+    }
+  }, [currentUser]);
 
   return (
     <div className="space-y-6 animate-fade-in bg-radial-glow p-2 rounded-2xl">

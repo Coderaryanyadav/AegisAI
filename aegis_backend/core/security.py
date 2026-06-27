@@ -172,7 +172,8 @@ async def log_audit_trail(db: AsyncSession, email: str, action: str, target_type
             prev_hash = "GENESIS"
             
         hash_input = f"{email}|{action}|{target_type}|{target_id or ''}|{details or ''}|{prev_hash}"
-        entry_hash = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()
+        import hmac
+        entry_hash = hmac.new(SECRET_KEY.encode(), hash_input.encode('utf-8'), hashlib.sha256).hexdigest()
 
         log = AuditLog(
             user_email=email,
@@ -206,7 +207,8 @@ async def verify_audit_trail_integrity(db: AsyncSession) -> bool:
                 continue
             chain_started = True
             hash_input = f"{log.user_email}|{log.action}|{log.target_type}|{log.target_id or ''}|{log.details or ''}|{prev_hash}"
-            computed = hashlib.sha256(hash_input.encode('utf-8')).hexdigest()
+            import hmac
+            computed = hmac.new(SECRET_KEY.encode(), hash_input.encode('utf-8'), hashlib.sha256).hexdigest()
             if log.entry_hash != computed:
                 return False
             prev_hash = log.entry_hash
