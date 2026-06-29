@@ -241,9 +241,10 @@ class BackupManager:
                     
                     # Dispose active connection pools to unlock database files
                     try:
-                        from aegis_backend.database import async_engine, async_engine_ro
+                        from aegis_backend.database import async_engine, async_engine_ro, engine
                         async_engine.sync_engine.dispose()
                         async_engine_ro.sync_engine.dispose()
+                        engine.dispose()
                     except Exception:
                         pass
                         

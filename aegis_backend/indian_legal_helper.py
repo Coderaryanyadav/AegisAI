@@ -150,7 +150,29 @@ class IndianLegalHelper:
         act_upper = act.upper().strip()
         sec_clean = section.strip()
 
-        # Try to load mappings dynamically from JSON file
+        # 1. First attempt database lookup using sync session
+        try:
+            from aegis_backend.database import SessionLocal, StatutoryMapping
+            db = SessionLocal()
+            try:
+                mapping = db.query(StatutoryMapping).filter(
+                    StatutoryMapping.old_act.ilike(act_upper),
+                    StatutoryMapping.old_section == sec_clean
+                ).first()
+                if mapping:
+                    return {
+                        "new_section": mapping.new_section,
+                        "act": mapping.new_act,
+                        "subject": mapping.subject,
+                        "change_type": mapping.change_type,
+                        "description": mapping.description
+                    }
+            finally:
+                db.close()
+        except Exception:
+            pass
+
+        # 2. Fallback to JSON or static configs if database query is empty or fails
         ipc_map = cls.IPC_TO_BNS_MAP
         crpc_map = cls.CRPC_TO_BNSS_MAP
         iea_map = cls.IEA_TO_BSA_MAP
@@ -165,7 +187,7 @@ class IndianLegalHelper:
                     crpc_map = data.get("CRPC_TO_BNSS_MAP", crpc_map)
                     iea_map = data.get("IEA_TO_BSA_MAP", iea_map)
         except Exception:
-            pass  # Fallback to local hardcoded configurations on any dynamic load error
+            pass
 
         if "IPC" in act_upper:
             return ipc_map.get(sec_clean)

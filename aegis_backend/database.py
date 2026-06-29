@@ -92,6 +92,8 @@ from sqlalchemy import event
 
 @event.listens_for(async_engine.sync_engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
+    if os.environ.get("AEGIS_TEST_MODE") == "true":
+        return
     try:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
@@ -103,6 +105,8 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
 
 @event.listens_for(async_engine_ro.sync_engine, "connect")
 def set_sqlite_pragma_ro(dbapi_connection, connection_record):
+    if os.environ.get("AEGIS_TEST_MODE") == "true":
+        return
     try:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
@@ -387,6 +391,17 @@ class TwoFactorSecret(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
+class StatutoryMapping(Base):
+    __tablename__ = "statutory_mappings"
+    id = Column(Integer, primary_key=True, index=True)
+    old_act = Column(String, index=True, nullable=False)  # IPC, CrPC, IEA
+    old_section = Column(String, index=True, nullable=False)
+    new_act = Column(String, index=True, nullable=False)  # BNS, BNSS, BSA
+    new_section = Column(String, index=True, nullable=False)
+    subject = Column(String, nullable=True)
+    change_type = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+
 # ====== Token Revocation ======
 class RevokedToken(Base):
     __tablename__ = "revoked_tokens"
@@ -425,6 +440,45 @@ def init_db():
 
     db = SessionLocal()
     try:
+        # Seed statutory conversion mappings from IndianLegalHelper static dictionaries if empty
+        if db.query(StatutoryMapping).count() == 0:
+            from aegis_backend.indian_legal_helper import IndianLegalHelper
+            
+            # Seed IPC mappings
+            for old_sec, detail in IndianLegalHelper.IPC_TO_BNS_MAP.items():
+                db.add(StatutoryMapping(
+                    old_act="IPC",
+                    old_section=old_sec,
+                    new_act=detail["act"],
+                    new_section=detail["new_section"],
+                    subject=detail["subject"],
+                    change_type=detail["change_type"],
+                    description=detail["description"]
+                ))
+            # Seed CrPC mappings
+            for old_sec, detail in IndianLegalHelper.CRPC_TO_BNSS_MAP.items():
+                db.add(StatutoryMapping(
+                    old_act="CrPC",
+                    old_section=old_sec,
+                    new_act=detail["act"],
+                    new_section=detail["new_section"],
+                    subject=detail["subject"],
+                    change_type=detail["change_type"],
+                    description=detail["description"]
+                ))
+            # Seed IEA mappings
+            for old_sec, detail in IndianLegalHelper.IEA_TO_BSA_MAP.items():
+                db.add(StatutoryMapping(
+                    old_act="IEA",
+                    old_section=old_sec,
+                    new_act=detail["act"],
+                    new_section=detail["new_section"],
+                    subject=detail["subject"],
+                    change_type=detail["change_type"],
+                    description=detail["description"]
+                ))
+            db.commit()
+
         # Seed admin
         admin_exists = db.query(User).filter(User.role == "admin").first()
         admin_pw = os.environ.get("AEGIS_ADMIN_PASSWORD")
