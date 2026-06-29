@@ -257,7 +257,7 @@ class Client(Base):
 class Matter(Base):
     __tablename__ = "matters"
     id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), index=True, nullable=False)
     case_number = Column(String, index=True, nullable=True)
     title = Column(String, nullable=False)
     court = Column(String, nullable=True)
@@ -279,7 +279,7 @@ class Matter(Base):
 class Schedule(Base):
     __tablename__ = "schedules"
     id = Column(Integer, primary_key=True, index=True)
-    matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), nullable=False)
+    matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), index=True, nullable=False)
     title = Column(String, nullable=False)
     schedule_type = Column(String, nullable=False) # hearing, deadline, meeting
     target_date = Column(DateTime, nullable=False) # DateTime column
@@ -293,7 +293,7 @@ class Schedule(Base):
 class Document(Base):
     __tablename__ = "documents"
     id = Column(Integer, primary_key=True, index=True)
-    matter_id = Column(Integer, ForeignKey("matters.id", ondelete="SET NULL"), nullable=True)
+    matter_id = Column(Integer, ForeignKey("matters.id", ondelete="SET NULL"), index=True, nullable=True)
     original_name = Column(String, nullable=False)
     stored_uuid = Column(String, unique=True, index=True, nullable=False)
     file_path = Column(String, nullable=False)
@@ -344,7 +344,7 @@ class AuthRateLimit(Base):
 class TimeEntry(Base):
     __tablename__ = "time_entries"
     id = Column(Integer, primary_key=True, index=True)
-    matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), nullable=False)
+    matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), index=True, nullable=False)
     user_email = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     hours = Column(Numeric(10, 2), nullable=False)
@@ -356,8 +356,8 @@ class TimeEntry(Base):
 class Invoice(Base):
     __tablename__ = "invoices"
     id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False)
-    matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), nullable=True)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"), index=True, nullable=False)
+    matter_id = Column(Integer, ForeignKey("matters.id", ondelete="CASCADE"), index=True, nullable=True)
     invoice_number = Column(String, unique=True, nullable=False)
     total_amount = Column(Numeric(10, 2), nullable=False)
     gst_amount = Column(Numeric(10, 2), nullable=False)
@@ -371,7 +371,7 @@ class Invoice(Base):
 class Annotation(Base):
     __tablename__ = "annotations"
     id = Column(Integer, primary_key=True, index=True)
-    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), index=True, nullable=False)
     user_email = Column(String, nullable=False)
     selected_text = Column(Text, nullable=False)
     note = Column(Text, nullable=True)

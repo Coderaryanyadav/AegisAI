@@ -15,6 +15,20 @@ class DocumentProcessor:
     """Processes legal PDFs, extracting digital text or falling back to OCR if scanned."""
 
     @staticmethod
+    def validate_safe_path(target_path: str) -> str:
+        """Resolves target_path and verifies it resides strictly within the user's Aegis AI directory or temp folder."""
+        from aegis_backend.database import AEGIS_DIR
+        import tempfile
+        
+        resolved_target = os.path.abspath(target_path)
+        resolved_aegis = os.path.abspath(AEGIS_DIR)
+        resolved_temp = os.path.abspath(tempfile.gettempdir())
+        
+        if not (resolved_target.startswith(resolved_aegis) or resolved_target.startswith(resolved_temp)):
+            raise PermissionError("Access Denied: Path traversal attempt detected outside sandbox boundaries.")
+        return resolved_target
+
+    @staticmethod
     def is_tesseract_available() -> bool:
         if pytesseract is None:
             return False
@@ -31,41 +45,35 @@ class DocumentProcessor:
         Extracts text from a PDF file.
         If extracted text length is below min_char_threshold, falls back to OCR.
         """
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+        safe_path = cls.validate_safe_path(file_path)
+        if not os.path.exists(safe_path):
+            raise FileNotFoundError(f"File not found: {safe_path}")
 
         logger.info(f"Processing document: {file_path}")
-        text_content = []
         doc = None
-
         try:
-            doc = fitz.open(file_path)
-            for page in doc:
-                text_content.append(page.get_text())
-        except Exception as e:
-            logger.error(f"Error opening or reading PDF via PyMuPDF: {e}")
-            if doc:
-                doc.close()
-            raise ValueError(f"Failed to parse PDF document: {e}")
+            try:
+                doc = fitz.open(safe_path)
+            except Exception as e:
+                logger.error(f"Error opening PDF via PyMuPDF: {e}")
+                raise ValueError(f"Failed to parse PDF document: {e}")
 
-        full_text = "\n".join(text_content).strip()
-        
-        # If we got enough text, return it directly
-        if len(full_text) >= min_char_threshold:
-            logger.info("Successfully extracted digital text from PDF.")
-            doc.close()
-            return full_text
+            text_content = [page.get_text() for page in doc]
+            full_text = "\n".join(text_content).strip()
+            
+            # If we got enough text, return it directly
+            if len(full_text) >= min_char_threshold:
+                logger.info("Successfully extracted digital text from PDF.")
+                return full_text
 
-        # Otherwise, fall back to OCR
-        logger.warning("Extracted text is empty or too short. Attempting OCR fallback...")
-        
-        if not cls.is_tesseract_available():
-            doc.close()
-            logger.warning("OCR is required for this scanned document, but Tesseract is not installed. Falling back to empty text.")
-            return ""
+            # Otherwise, fall back to OCR
+            logger.warning("Extracted text is empty or too short. Attempting OCR fallback...")
+            
+            if not cls.is_tesseract_available():
+                logger.warning("OCR is required for this scanned document, but Tesseract is not installed. Falling back to empty text.")
+                return ""
 
-        ocr_text_content = ["" for _ in range(len(doc))]
-        try:
+            ocr_text_content = ["" for _ in range(len(doc))]
             import concurrent.futures
             
             def process_page(page_idx):
@@ -91,12 +99,12 @@ class DocumentProcessor:
             full_ocr_text = "\n".join(ocr_text_content).strip()
             logger.info("Successfully extracted text using OCR.")
             return full_ocr_text
-        except Exception as e:
-            logger.error(f"OCR processing failed: {e}")
-            raise RuntimeError(f"OCR processing failed: {e}")
         finally:
             if doc:
-                doc.close()
+                try:
+                    doc.close()
+                except Exception:
+                    pass
 
 if __name__ == "__main__":
     # Quick CLI test

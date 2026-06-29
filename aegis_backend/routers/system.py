@@ -126,7 +126,7 @@ async def list_ollama_models(current_user: User = Depends(get_current_user)):
     return {"models": models}
 
 @router.get("/system/status")
-async def system_diagnostics(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def system_diagnostics(db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_admin)):
     models = await OllamaService.get_available_models()
     ollama_running = len(models) > 0
 
