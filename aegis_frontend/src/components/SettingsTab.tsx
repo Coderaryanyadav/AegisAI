@@ -40,11 +40,11 @@ export function SettingsTab({
   const check2FAStatus = async () => {
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/2fa/status`);
-      if (res.ok) { 
-        const d = await res.json(); 
-        setTwoFaEnabled(d.enabled); 
+      if (res.ok) {
+        const d = await res.json();
+        setTwoFaEnabled(d.enabled);
       }
-    } catch {}
+    } catch { }
   };
 
   const handle2FASetup = async () => {
@@ -55,13 +55,13 @@ export function SettingsTab({
         const d = await res.json();
         setTwoFaQr(d.qr_code_base64);
         setTwoFaSecret(d.secret);
-      } else { 
-        showNotification("2FA setup failed", "error"); 
+      } else {
+        showNotification("2FA setup failed", "error");
       }
-    } catch (e: any) { 
-      showNotification(e.message, "error"); 
-    } finally { 
-      setTwoFaLoading(false); 
+    } catch (e: any) {
+      showNotification(e.message, "error");
+    } finally {
+      setTwoFaLoading(false);
     }
   };
 
@@ -78,11 +78,11 @@ export function SettingsTab({
         setTwoFaQr("");
         setTwoFaCode("");
         showNotification("2FA enabled successfully!", "success");
-      } else { 
-        showNotification("Invalid TOTP code", "error"); 
+      } else {
+        showNotification("Invalid TOTP code", "error");
       }
-    } catch (e: any) { 
-      showNotification(e.message, "error"); 
+    } catch (e: any) {
+      showNotification(e.message, "error");
     }
   };
 
@@ -153,8 +153,8 @@ export function SettingsTab({
         <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
           <h3 className="text-sm font-bold text-zinc-200">Language / भाषा</h3>
           <div className="flex gap-3">
-            <button onClick={() => { setLang("en"); localStorage.setItem("aegis_lang","en"); }} className={`flex-1 py-3 rounded-xl text-sm font-semibold border transition cursor-pointer ${lang === "en" ? "bg-zinc-100 text-zinc-900 border-zinc-300" : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}>English</button>
-            <button onClick={() => { setLang("hi"); localStorage.setItem("aegis_lang","hi"); }} className={`flex-1 py-3 rounded-xl text-sm font-semibold border transition cursor-pointer ${lang === "hi" ? "bg-zinc-100 text-zinc-900 border-zinc-300" : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}>हिन्दी</button>
+            <button onClick={() => { setLang("en"); localStorage.setItem("aegis_lang", "en"); }} className={`flex-1 py-3 rounded-xl text-sm font-semibold border transition cursor-pointer ${lang === "en" ? "bg-zinc-100 text-zinc-900 border-zinc-300" : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}>English</button>
+            <button onClick={() => { setLang("hi"); localStorage.setItem("aegis_lang", "hi"); }} className={`flex-1 py-3 rounded-xl text-sm font-semibold border transition cursor-pointer ${lang === "hi" ? "bg-zinc-100 text-zinc-900 border-zinc-300" : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}>हिन्दी</button>
           </div>
         </div>
         <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-3">
@@ -176,29 +176,29 @@ export function SettingsTab({
             <div className="flex justify-between p-2 bg-zinc-950/60 rounded-lg"><span className="text-zinc-505">2FA</span><span className={twoFaEnabled ? "text-emerald-400" : "text-zinc-405"}>{twoFaEnabled ? "Enabled" : "Disabled"}</span></div>
           </div>
         </div>
-        
+
         <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
           <h3 className="text-sm font-bold text-zinc-200">Custom Firm Letterhead</h3>
           <p className="text-xs text-zinc-400">Configure logo and title displayed on all generated PDFs &amp; Invoices.</p>
-          
+
           <div className="space-y-3 text-xs">
             <div>
               <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">Firm / Advocate Name</label>
-              <input 
-                type="text" 
-                value={firmName} 
-                onChange={(e) => setFirmName(e.target.value)} 
+              <input
+                type="text"
+                value={firmName}
+                onChange={(e) => setFirmName(e.target.value)}
                 placeholder="e.g. Chambers of Aryan Yadav"
                 className="w-full p-2.5 rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805"
               />
             </div>
-            
+
             <div>
               <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">GST Rate (%)</label>
-              <input 
-                type="number" 
-                value={gstRate} 
-                onChange={(e) => setGstRate(parseFloat(e.target.value) || 0)} 
+              <input
+                type="number"
+                value={gstRate}
+                onChange={(e) => setGstRate(parseFloat(e.target.value) || 0)}
                 placeholder="18"
                 min="0"
                 max="100"
@@ -206,11 +206,11 @@ export function SettingsTab({
                 className="w-full p-2.5 rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805"
               />
             </div>
-            
+
             <div>
               <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">Firm Logo (PNG / JPG)</label>
-              <input 
-                type="file" 
+              <input
+                type="file"
                 accept="image/*"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
@@ -227,7 +227,7 @@ export function SettingsTab({
                 className="w-full text-xs text-zinc-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-zinc-800 file:text-zinc-202 hover:file:bg-zinc-700 cursor-pointer"
               />
             </div>
-            
+
             {firmLogo && (
               <div className="space-y-1">
                 <span className="text-[10px] text-zinc-500 font-bold block uppercase font-mono">Logo Preview</span>
@@ -236,8 +236,8 @@ export function SettingsTab({
                 </div>
               </div>
             )}
-            
-            <button 
+
+            <button
               onClick={handleSaveFirmSettings}
               className="w-full py-2 bg-violet-800 hover:bg-violet-750 text-white font-bold rounded-lg transition text-xs cursor-pointer"
             >

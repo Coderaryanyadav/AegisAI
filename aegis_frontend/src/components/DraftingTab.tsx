@@ -63,10 +63,10 @@ export function DraftingTab({
     try {
       const response = await fetchWithAuth(
         `${API_BASE}/api/draft/generate?template_id=${selectedTemplate.id}&model_name=${selectedModel}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(templateFields)
-        }
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(templateFields)
+      }
       );
       if (response.ok) {
         const data = await response.json();
@@ -120,18 +120,17 @@ export function DraftingTab({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+
         {/* Templates Column */}
         <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
           <h3 className="text-sm font-bold text-zinc-200">Legal Templates</h3>
           <div className="space-y-1.5">
             {templates.map(t => (
-              <button 
+              <button
                 key={t.id}
                 onClick={() => handleSelectTemplate(t)}
-                className={`w-full text-left p-3 rounded-lg text-xs transition border cursor-pointer ${
-                  selectedTemplate?.id === t.id ? "bg-zinc-800 border-zinc-700 text-zinc-100 font-semibold" : "bg-transparent border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-                }`}
+                className={`w-full text-left p-3 rounded-lg text-xs transition border cursor-pointer ${selectedTemplate?.id === t.id ? "bg-zinc-800 border-zinc-700 text-zinc-100 font-semibold" : "bg-transparent border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+                  }`}
               >
                 {t.name}
               </button>
@@ -144,7 +143,7 @@ export function DraftingTab({
               {selectedTemplate.fields.map((field: string) => (
                 <div key={field} className="space-y-1">
                   <label className="block text-[10px] text-zinc-500 font-bold uppercase">{field.replace(/_/g, ' ')}</label>
-                  <input 
+                  <input
                     type="text"
                     value={templateFields[field] || ""}
                     onChange={(e) => setTemplateFields({ ...templateFields, [field]: e.target.value })}
@@ -153,7 +152,7 @@ export function DraftingTab({
                   />
                 </div>
               ))}
-              <button 
+              <button
                 type="submit"
                 disabled={isDrafting}
                 className="w-full py-2 bg-zinc-50 hover:bg-zinc-200 disabled:bg-zinc-800 text-zinc-950 disabled:text-zinc-500 font-bold rounded-lg text-xs transition cursor-pointer"
@@ -171,7 +170,7 @@ export function DraftingTab({
               <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider font-mono">Workspace Editor</h3>
               {generatedDraft && (
                 <div className="flex gap-3">
-                  <button 
+                  <button
                     onClick={() => {
                       const blob = new Blob([generatedDraft], { type: "text/plain;charset=utf-8" });
                       const url = URL.createObjectURL(blob);
@@ -184,7 +183,7 @@ export function DraftingTab({
                   >
                     <Download className="w-3 h-3" /> Save Text
                   </button>
-                  <button 
+                  <button
                     onClick={() => {
                       exportToPDF(selectedTemplate?.name || "Legal_Draft", generatedDraft, currentUser?.firm_name, currentUser?.firm_logo);
                     }}
@@ -203,8 +202,8 @@ export function DraftingTab({
                     {/* Court Header Select */}
                     <div className="flex items-center gap-1.5">
                       <span className="text-[10px] text-zinc-500 font-bold uppercase">Court Pleading Header:</span>
-                      <select 
-                        value={courtHeader} 
+                      <select
+                        value={courtHeader}
                         onChange={(e) => setCourtHeader(e.target.value)}
                         className="bg-zinc-900 border border-zinc-850 text-zinc-300 rounded px-2 py-1 text-xs outline-none focus:border-zinc-700"
                       >
@@ -218,8 +217,8 @@ export function DraftingTab({
                     {/* Spacing Select */}
                     <div className="flex items-center gap-1.5">
                       <span className="text-[10px] text-zinc-500 font-bold uppercase">Spacing:</span>
-                      <select 
-                        value={lineSpacing} 
+                      <select
+                        value={lineSpacing}
                         onChange={(e) => setLineSpacing(e.target.value)}
                         className="bg-zinc-900 border border-zinc-850 text-zinc-300 rounded px-2 py-1 text-xs outline-none focus:border-zinc-700"
                       >
@@ -232,8 +231,8 @@ export function DraftingTab({
                     {/* Margin Select */}
                     <div className="flex items-center gap-1.5">
                       <span className="text-[10px] text-zinc-500 font-bold uppercase">Left Margin:</span>
-                      <select 
-                        value={marginSpaces} 
+                      <select
+                        value={marginSpaces}
                         onChange={(e) => setMarginSpaces(e.target.value)}
                         className="bg-zinc-900 border border-zinc-850 text-zinc-300 rounded px-2 py-1 text-xs outline-none focus:border-zinc-700"
                       >
@@ -245,7 +244,7 @@ export function DraftingTab({
                     </div>
                   </div>
 
-                  <button 
+                  <button
                     onClick={handleApplyFormatting}
                     disabled={isFormattingDraft}
                     className="px-3 py-1.5 bg-zinc-50 hover:bg-zinc-200 disabled:bg-zinc-800 text-zinc-950 disabled:text-zinc-500 font-bold rounded-lg text-[10px] transition flex items-center gap-1 shrink-0 cursor-pointer"
@@ -265,7 +264,7 @@ export function DraftingTab({
                 </div>
 
                 {/* Editor Textarea */}
-                <textarea 
+                <textarea
                   value={generatedDraft}
                   onChange={(e) => setGeneratedDraft(e.target.value)}
                   className="w-full h-[380px] p-4 bg-transparent border border-zinc-900 rounded-lg text-xs leading-relaxed font-mono focus:ring-0 focus:border-zinc-850 outline-none text-zinc-300"

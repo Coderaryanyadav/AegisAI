@@ -481,3 +481,55 @@ def test_backup_manager_sqlite():
         # Clean up backup file
         if os.path.exists(backup_path):
             os.remove(backup_path)
+
+def test_token_revocation_logout():
+    from fastapi.testclient import TestClient
+    from aegis_backend.main import app
+    from aegis_backend.database import SessionLocal, User, RevokedToken
+    from aegis_backend.core.security import hash_password
+    
+    client = TestClient(app)
+    db = SessionLocal()
+    
+    # 1. Create a test user
+    test_user = db.query(User).filter(User.email == "revocation_test@legalai.local").first()
+    if not test_user:
+        test_user = User(
+            email="revocation_test@legalai.local",
+            hashed_password=hash_password("RevocationPassword123!"),
+            role="lawyer"
+        )
+        db.add(test_user)
+        db.commit()
+        db.refresh(test_user)
+        
+    try:
+        # Get token
+        login_res = client.post("/api/v1/auth/token", data={
+            "username": "revocation_test@legalai.local",
+            "password": "RevocationPassword123!"
+        })
+        assert login_res.status_code == 200
+        token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        # Verify access is authorized
+        me_res = client.get("/api/v1/auth/me", headers=headers)
+        assert me_res.status_code == 200
+        
+        # 2. Call logout endpoint to revoke token
+        logout_res = client.post("/api/v1/auth/logout", headers=headers)
+        assert logout_res.status_code == 200
+        
+        # 3. Verify access is now rejected as 401 Unauthorized
+        me_revoked_res = client.get("/api/v1/auth/me", headers=headers)
+        assert me_revoked_res.status_code == 401
+        assert "revoked" in me_revoked_res.json()["detail"].lower()
+        
+    finally:
+        # Cleanup
+        db.delete(test_user)
+        db.query(RevokedToken).delete()
+        db.commit()
+        db.close()
+

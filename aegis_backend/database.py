@@ -336,6 +336,13 @@ class TwoFactorSecret(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
+# ====== Token Revocation ======
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String, unique=True, index=True, nullable=False)
+    revoked_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
+
 def run_migrations():
     import alembic.config
     import alembic.command
@@ -387,14 +394,25 @@ def init_db():
                 logger.warning("AEGIS_TEST_MODE is enabled. Seeding admin account with default password 'adminpassword123'.")
             else:
                 actual_pw = secrets.token_urlsafe(16)
-                logger.warning(
-                    "\n" + "="*80 + "\n"
-                    "SECURITY WARNING: Seeding default admin account (admin@legalai.local) with a programmatically generated password.\n"
-                    f"Generated Password: {actual_pw}\n"
-                    "Please store this password safely. You will be forced to change this password on first login.\n"
-                    "To set a custom admin password, configure 'AEGIS_ADMIN_PASSWORD' in your environment.\n" +
-                    "="*80 + "\n"
-                )
+                pw_file_path = os.path.join(AEGIS_DIR, ".admin.initial.pw")
+                try:
+                    with open(pw_file_path, "w") as f:
+                        f.write(actual_pw)
+                    try:
+                        os.chmod(pw_file_path, 0o600)
+                    except Exception:
+                        pass
+                    logger.warning(
+                        "\n" + "="*80 + "\n"
+                        "SECURITY WARNING: Seeding default admin account (admin@legalai.local) with a programmatically generated password.\n"
+                        f"The password has been securely written to: {pw_file_path}\n"
+                        "Please retrieve it, log in, and delete that file.\n"
+                        "To set a custom admin password directly, configure 'AEGIS_ADMIN_PASSWORD' in your environment.\n" +
+                        "="*80 + "\n"
+                    )
+                except Exception as file_ex:
+                    logger.error(f"Failed to write admin password to secure file: {file_ex}")
+                    logger.warning(f"TEMPORARY PASSWORD (File write failed): {actual_pw}")
                 
             hashed = bcrypt.hashpw(actual_pw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
             default_admin = User(

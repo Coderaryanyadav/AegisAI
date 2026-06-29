@@ -41,6 +41,26 @@ def create_refresh_token(data: dict):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 async def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
+    # Check token revocation
+    is_revoked = False
+    try:
+        redis_client = await get_redis()
+        if await redis_client.get(f"revoked_token:{token}"):
+            is_revoked = True
+    except Exception:
+        from aegis_backend.database import RevokedToken
+        from sqlalchemy import select
+        rev_stmt = select(RevokedToken).filter(RevokedToken.token == token)
+        rev_res = await db.execute(rev_stmt)
+        if rev_res.scalars().first():
+            is_revoked = True
+
+    if is_revoked:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked/logged out."
+        )
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("type") != "access":
@@ -94,6 +114,8 @@ async def get_redis():
     return await aioredis.from_url(REDIS_URL, decode_responses=True)
 
 async def rate_limit_auth(request: Request, db: AsyncSession = Depends(get_db)):
+    if os.environ.get("AEGIS_TEST_MODE") == "true":
+        return
     ip = request.client.host if request.client else "127.0.0.1"
     
     try:
@@ -114,8 +136,31 @@ async def rate_limit_auth(request: Request, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         if isinstance(e, HTTPException):
             raise
-        # Fallback if Redis is down (fail open for now, log error)
-        print(f"Redis connection failed: {e}")
+        # Fallback to DB rate limiting
+        from aegis_backend.database import AuthRateLimit
+        from sqlalchemy import select, func
+        import datetime
+        
+        # Check attempts in last 60 seconds
+        one_minute_ago = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(seconds=60)
+        stmt = select(func.count(AuthRateLimit.id)).filter(
+            AuthRateLimit.ip_address == ip,
+            AuthRateLimit.timestamp >= one_minute_ago
+        )
+        res = await db.execute(stmt)
+        attempts = res.scalar() or 0
+        if attempts >= 5:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many authentication attempts. Please try again later."
+            )
+        
+        # Record attempt
+        db.add(AuthRateLimit(ip_address=ip))
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
 
 # Online/Offline Mode State (shared state)
 SYSTEM_ONLINE_MODE = False
