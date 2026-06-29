@@ -69,9 +69,14 @@ class OllamaService:
                     matched = available[0]
             
             models_to_try.append(matched)
+            # Limit retry fallbacks to at most one other available model to prevent multiple sequential API timeouts
+            fallback_count = 0
             for m in available:
                 if m not in models_to_try:
                     models_to_try.append(m)
+                    fallback_count += 1
+                    if fallback_count >= 1:
+                        break
         else:
             models_to_try.append(model)
 

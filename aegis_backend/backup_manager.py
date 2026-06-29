@@ -238,6 +238,24 @@ class BackupManager:
                     db_path = DB_PATH
                     if DATABASE_URL.startswith("sqlite:///"):
                         db_path = DATABASE_URL.replace("sqlite:///", "")
+                    
+                    # Dispose active connection pools to unlock database files
+                    try:
+                        from aegis_backend.database import async_engine, async_engine_ro
+                        async_engine.sync_engine.dispose()
+                        async_engine_ro.sync_engine.dispose()
+                    except Exception:
+                        pass
+                        
+                    # Remove WAL and SHM logs to prevent old transaction replays on restored DB
+                    for suffix in ["-wal", "-shm"]:
+                        wal_file = f"{db_path}{suffix}"
+                        if os.path.exists(wal_file):
+                            try:
+                                os.remove(wal_file)
+                            except Exception:
+                                pass
+                                
                     shutil.copy2(archived_db_path, db_path)
                 else:
                     from urllib.parse import urlparse

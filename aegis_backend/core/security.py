@@ -136,31 +136,32 @@ async def rate_limit_auth(request: Request, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         if isinstance(e, HTTPException):
             raise
-        # Fallback to DB rate limiting
-        from aegis_backend.database import AuthRateLimit
+        # Fallback to DB rate limiting using isolated session context
+        from aegis_backend.database import AuthRateLimit, AsyncSessionLocal
         from sqlalchemy import select, func
         import datetime
         
-        # Check attempts in last 60 seconds
-        one_minute_ago = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(seconds=60)
-        stmt = select(func.count(AuthRateLimit.id)).filter(
-            AuthRateLimit.ip_address == ip,
-            AuthRateLimit.timestamp >= one_minute_ago
-        )
-        res = await db.execute(stmt)
-        attempts = res.scalar() or 0
-        if attempts >= 5:
-            raise HTTPException(
-                status_code=429,
-                detail="Too many authentication attempts. Please try again later."
+        async with AsyncSessionLocal() as local_db:
+            # Check attempts in last 60 seconds
+            one_minute_ago = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(seconds=60)
+            stmt = select(func.count(AuthRateLimit.id)).filter(
+                AuthRateLimit.ip_address == ip,
+                AuthRateLimit.timestamp >= one_minute_ago
             )
-        
-        # Record attempt
-        db.add(AuthRateLimit(ip_address=ip))
-        try:
-            await db.commit()
-        except Exception:
-            await db.rollback()
+            res = await local_db.execute(stmt)
+            attempts = res.scalar() or 0
+            if attempts >= 5:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many authentication attempts. Please try again later."
+                )
+            
+            # Record attempt
+            local_db.add(AuthRateLimit(ip_address=ip))
+            try:
+                await local_db.commit()
+            except Exception:
+                await local_db.rollback()
 
 # Online/Offline Mode State (shared state)
 SYSTEM_ONLINE_MODE = False
