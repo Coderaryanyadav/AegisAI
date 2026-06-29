@@ -76,7 +76,9 @@ class DocumentProcessor:
                 image = Image.open(io.BytesIO(image_data))
                 return pytesseract.image_to_string(image)
                 
-            with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Restrict concurrency to avoid CPU starvation on multi-page OCR processes
+            max_workers = max(1, min(4, (os.cpu_count() or 2) // 2))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {executor.submit(process_page, i): i for i in range(len(doc))}
                 for future in concurrent.futures.as_completed(futures):
                     page_idx = futures[future]

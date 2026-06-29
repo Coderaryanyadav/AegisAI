@@ -16,7 +16,7 @@ from aegis_backend.database import get_db, User, AEGIS_DIR, get_secure_key
 SEC_KEY_PATH = os.path.join(AEGIS_DIR, ".jwt.key")
 SECRET_KEY = get_secure_key("jwt", SEC_KEY_PATH, is_hex=True)
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("AEGIS_ACCESS_TOKEN_EXPIRE_MINUTES", "60"))  # 60 minutes sliding session
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("AEGIS_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))  # 30 minutes sliding session
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
 

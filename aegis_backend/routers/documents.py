@@ -30,8 +30,10 @@ async def upload_document(
     vault_dir = os.path.join(AEGIS_DIR, "vault")
     os.makedirs(vault_dir, exist_ok=True)
 
+    # Sanitize incoming filename to prevent directory traversal
+    safe_filename = os.path.basename(file.filename)
     file_uuid = str(uuid.uuid4())
-    ext = os.path.splitext(file.filename)[1]
+    ext = os.path.splitext(safe_filename)[1]
     stored_name = f"{file_uuid}{ext}"
     dest_path = os.path.join(vault_dir, stored_name)
 
@@ -39,7 +41,7 @@ async def upload_document(
     allowed_extensions = {".pdf", ".txt"}
     allowed_content_types = {"application/pdf", "text/plain"}
     
-    ext = os.path.splitext(file.filename)[1].lower()
+    ext = os.path.splitext(safe_filename)[1].lower()
     if ext not in allowed_extensions or file.content_type not in allowed_content_types:
         raise HTTPException(
             status_code=400,
@@ -79,7 +81,7 @@ async def upload_document(
     # Register in SQLite
     doc = Document(
         matter_id=matter_id,
-        original_name=file.filename,
+        original_name=safe_filename,
         stored_uuid=file_uuid,
         file_path=dest_path,
         file_hash=file_hash,
@@ -89,7 +91,7 @@ async def upload_document(
     await db.commit()
     await db.refresh(doc)
 
-    await log_audit_trail(db, current_user.email, "UPLOAD_DOC", "documents", str(doc.id), file.filename)
+    await log_audit_trail(db, current_user.email, "UPLOAD_DOC", "documents", str(doc.id), safe_filename)
 
     # Trigger background extractor and indexer
     background_tasks.add_task(DocumentService.process_uploaded_document_task, doc.id, dest_path)
