@@ -104,3 +104,93 @@ class DocumentService:
                 except Exception as commit_err:
                     logger.error(f"Failed to commit failed status for document {doc_id}: {commit_err}")
                     await db.rollback()
+
+    @staticmethod
+    async def get_documents_list(
+        db: AsyncSession,
+        current_user: User,
+        matter_id: Optional[int] = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> Tuple[List[Document], int]:
+        from aegis_backend.repositories.document_repository import DocumentRepository
+        repo = DocumentRepository(db)
+        if current_user.role == "client":
+            return await repo.list_documents_for_client(
+                client_email=current_user.email,
+                matter_id=matter_id,
+                skip=skip,
+                limit=limit
+            )
+        return await repo.list_documents(
+            matter_id=matter_id,
+            skip=skip,
+            limit=limit
+        )
+
+    @staticmethod
+    async def create_document_record(
+        db: AsyncSession,
+        matter_id: Optional[int],
+        original_name: str,
+        stored_uuid: str,
+        file_path: str,
+        file_hash: str
+    ) -> Document:
+        from aegis_backend.repositories.document_repository import DocumentRepository
+        repo = DocumentRepository(db)
+        
+        # Check duplicate
+        existing = await repo.get_by_hash(file_hash)
+        if existing:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=f"Duplicate document already uploaded (ID: {existing.id}, Name: {existing.original_name})"
+            )
+
+        doc = Document(
+            matter_id=matter_id,
+            original_name=original_name,
+            stored_uuid=stored_uuid,
+            file_path=file_path,
+            file_hash=file_hash,
+            status="uploaded"
+        )
+        return await repo.create(doc)
+
+    @staticmethod
+    async def remove_document(db: AsyncSession, doc_id: int, current_user: User):
+        from aegis_backend.repositories.document_repository import DocumentRepository
+        from aegis_backend.core.security import check_document_access
+        from aegis_backend.database import Matter
+        from sqlalchemy import select
+        from fastapi import HTTPException
+        
+        repo = DocumentRepository(db)
+        doc = await check_document_access(db, current_user, doc_id)
+        
+        if current_user.role == "lawyer" and doc.matter_id:
+            stmt = select(Matter).filter(Matter.id == doc.matter_id)
+            res = await db.execute(stmt)
+            matter = res.scalars().first()
+            if not matter:
+                raise HTTPException(status_code=403, detail="Matter not found for this document")
+
+        # Delete vectors
+        try:
+            vector_store.delete_document_vectors(doc.id)
+        except Exception as e:
+            logger.warning(f"Error removing vectors for doc {doc_id}: {e}")
+
+        # Delete physical files
+        filename = os.path.basename(doc.file_path)
+        real_path = os.path.join(AEGIS_DIR, "vault", filename)
+        txt_path = real_path + ".txt"
+        if os.path.exists(real_path):
+            os.remove(real_path)
+        if os.path.exists(txt_path):
+            os.remove(txt_path)
+
+        await repo.delete(doc)
+

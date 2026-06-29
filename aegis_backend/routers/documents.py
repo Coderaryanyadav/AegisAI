@@ -63,16 +63,6 @@ async def upload_document(
     sha256_hash.update(raw_data)
     file_hash = sha256_hash.hexdigest()
 
-    # Check if document already exists by hash
-    stmt_dup = select(Document).filter(Document.file_hash == file_hash)
-    res_dup = await db.execute(stmt_dup)
-    existing_doc = res_dup.scalars().first()
-    if existing_doc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Duplicate document already uploaded (ID: {existing_doc.id}, Name: {existing_doc.original_name})"
-        )
-
     from aegis_backend.database import cipher
     
     def encrypt_and_save(data: bytes, path: str):
@@ -83,18 +73,15 @@ async def upload_document(
     import asyncio
     await asyncio.to_thread(encrypt_and_save, raw_data, dest_path)
 
-    # Register in SQLite
-    doc = Document(
+    # Register in SQLite via DocumentService
+    doc = await DocumentService.create_document_record(
+        db=db,
         matter_id=matter_id,
         original_name=safe_filename,
         stored_uuid=file_uuid,
         file_path=dest_path,
-        file_hash=file_hash,
-        status="uploaded"
+        file_hash=file_hash
     )
-    db.add(doc)
-    await db.commit()
-    await db.refresh(doc)
 
     await log_audit_trail(db, current_user.email, "UPLOAD_DOC", "documents", str(doc.id), safe_filename)
 
@@ -107,34 +94,23 @@ async def upload_document(
     return doc
 
 @router.get("/documents", response_model=List[DocumentResponse])
-async def list_documents(response: Response, matter_id: Optional[int] = None, skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    stmt = select(Document)
-    if current_user.role == "client":
-        stmt_client = select(Client).filter(Client.email == current_user.email)
-        res_client = await db.execute(stmt_client)
-        client = res_client.scalars().first()
-        if not client:
-            response.headers["X-Total-Count"] = "0"
-            return []
-        
-        stmt_matters = select(Matter.id).filter(Matter.client_id == client.id)
-        res_matters = await db.execute(stmt_matters)
-        mat_ids = res_matters.scalars().all()
-        
-        if matter_id and matter_id in mat_ids:
-            stmt = stmt.filter(Document.matter_id == matter_id)
-        else:
-            stmt = stmt.filter(Document.matter_id.in_(mat_ids))
-    elif matter_id:
-        stmt = stmt.filter(Document.matter_id == matter_id)
-    
-    count_stmt = select(func.count(Document.id)).select_from(stmt.subquery())
-    count_res = await db.execute(count_stmt)
-    total_count = count_res.scalar()
+async def list_documents(
+    response: Response,
+    matter_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    documents, total_count = await DocumentService.get_documents_list(
+        db=db,
+        current_user=current_user,
+        matter_id=matter_id,
+        skip=skip,
+        limit=limit
+    )
     response.headers["X-Total-Count"] = str(total_count)
-    
-    res = await db.execute(stmt.offset(skip).limit(limit))
-    return res.scalars().all()
+    return documents
 
 @router.get("/documents/{id}/text")
 async def get_document_text(id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -150,38 +126,7 @@ async def get_document_text(id: int, db: AsyncSession = Depends(get_db), current
 
 @router.delete("/documents/{id}")
 async def delete_document(id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_lawyer_or_admin)):
-    from aegis_backend.core.security import check_document_access
-    
-    # Check if the user has access to this document and it exists
-    doc = await check_document_access(db, current_user, id)
-    
-    if current_user.role == "lawyer":
-        # Lawyers can only delete if the document is unassigned OR belongs to a matter owned by their client accounts?
-        # Let's enforce that only admins can delete, or lawyers assigned to the matter
-        if doc.matter_id:
-            stmt = select(Matter).filter(Matter.id == doc.matter_id)
-            res = await db.execute(stmt)
-            matter = res.scalars().first()
-            if not matter:
-                raise HTTPException(status_code=403, detail="Matter not found for this document")
-    
-    # Remove vectors
-    try:
-        vector_store.delete_document_vectors(doc.id)
-    except Exception as e:
-        logger.warning(f"Error removing vectors for doc {id}: {e}")
-
-    # Remove files safely
-    filename = os.path.basename(doc.file_path)
-    real_path = os.path.join(AEGIS_DIR, "vault", filename)
-    txt_path = real_path + ".txt"
-    if os.path.exists(real_path):
-        os.remove(real_path)
-    if os.path.exists(txt_path):
-        os.remove(txt_path)
-
-    await db.delete(doc)
-    await db.commit()
+    await DocumentService.remove_document(db=db, doc_id=id, current_user=current_user)
     
     # Invalidate RAG Cache
     rag_cache.clear()
