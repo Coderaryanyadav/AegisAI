@@ -4,8 +4,11 @@ const { spawn } = require('child_process');
 const http = require('http');
 const fs = require('fs');
 const net = require('net');
+const serve = require('electron-serve');
+const serveStatic = serve({ directory: 'out' });
 
 let mainWindow;
+let splashWindow;
 let backendProcess = null;
 let staticServerPort = 3000;
 
@@ -40,66 +43,7 @@ function getFreePort(startPort, callback) {
   });
 }
 
-// Minimal static HTTP server to resolve Next.js asset paths correctly
-function startStaticServer(port, callback) {
-  const server = http.createServer((req, res) => {
-    let safePath = decodeURIComponent(req.url.split('?')[0]);
-    if (safePath === '/') {
-      safePath = '/index.html';
-    }
-
-    const filePath = path.join(__dirname, 'out', safePath);
-    const ext = path.extname(filePath).toLowerCase();
-    
-    const mimeTypes = {
-      '.html': 'text/html',
-      '.css': 'text/css',
-      '.js': 'text/javascript',
-      '.json': 'application/json',
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.gif': 'image/gif',
-      '.svg': 'image/svg+xml',
-      '.ico': 'image/x-icon'
-    };
-
-    const contentType = mimeTypes[ext] || 'application/octet-stream';
-
-    fs.readFile(filePath, (err, content) => {
-      if (err) {
-        if (err.code === 'ENOENT') {
-          // If page has trailing slash redirect or router fallback
-          const alternativePath = filePath + (filePath.endsWith('/') ? 'index.html' : '/index.html');
-          fs.readFile(alternativePath, (altErr, altContent) => {
-            if (altErr) {
-              res.writeHead(404, { 'Content-Type': 'text/plain' });
-              res.end('404 Not Found');
-            } else {
-              res.writeHead(200, { 'Content-Type': 'text/html' });
-              res.end(altContent, 'utf-8');
-            }
-          });
-        } else {
-          res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end(`Server Error: ${err.code}`);
-        }
-      } else {
-        res.writeHead(200, { 'Content-Type': contentType });
-        res.end(content, 'utf-8');
-      }
-    });
-  });
-
-  server.listen(port, '127.0.0.1', () => {
-    log(`Static web server running on http://127.0.0.1:${port}`);
-    callback(null);
-  });
-
-  server.on('error', (err) => {
-    callback(err);
-  });
-}
-
+// startStaticServer removed in favor of electron-serve
 // Function to check if backend server is responsive
 function checkBackend(port, timeoutMs, callback) {
   const startTime = Date.now();
@@ -192,6 +136,29 @@ function startBackend(port) {
   }
 }
 
+function createSplash() {
+  splashWindow = new BrowserWindow({
+    width: 400,
+    height: 300,
+    transparent: false,
+    backgroundColor: '#09090b',
+    frame: false,
+    alwaysOnTop: true,
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+  splashWindow.loadFile(path.join(__dirname, 'splash.html'));
+  splashWindow.once('ready-to-show', () => {
+    splashWindow.show();
+  });
+  splashWindow.on('closed', () => {
+    splashWindow = null;
+  });
+}
+
 function createWindow(backendPort) {
   mainWindow = new BrowserWindow({
     title: 'AegisAI Offline Legal Suite',
@@ -204,6 +171,7 @@ function createWindow(backendPort) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.js')
     }
   });
@@ -217,11 +185,16 @@ function createWindow(backendPort) {
     mainWindow.loadURL(`http://localhost:3000?backend_port=${backendPort}`);
     mainWindow.webContents.openDevTools();
   } else {
-    log(`Loading production static build on port ${staticServerPort} with backend port ${backendPort}`);
-    mainWindow.loadURL(`http://127.0.0.1:${staticServerPort}?backend_port=${backendPort}`); mainWindow.webContents.openDevTools();
+    log(`Loading production static build with backend port ${backendPort}`);
+    serveStatic(mainWindow).then(() => {
+      mainWindow.loadURL(`app://-?backend_port=${backendPort}`);
+    });
   }
 
   mainWindow.once('ready-to-show', () => {
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      splashWindow.close();
+    }
     mainWindow.show();
   });
 
@@ -231,33 +204,22 @@ function createWindow(backendPort) {
 }
 
 app.whenReady().then(() => {
+  createSplash();
   // First, find a free port for FastAPI backend
   getFreePort(8000, (freeBackendPort) => {
     const backendPort = freeBackendPort;
     
-    // Next, find a free port for static Next.js assets
-    getFreePort(3000, (freeStaticPort) => {
-      staticServerPort = freeStaticPort;
-      
-      // Start local static server
-      startStaticServer(staticServerPort, (err) => {
-        if (err) {
-          log(`Failed to start static server: ${err.message}`);
-        }
-        
-        // Start FastAPI Python backend on dynamic port
-        startBackend(backendPort);
+    // Start FastAPI Python backend on dynamic port
+    startBackend(backendPort);
 
-        // Wait 15 seconds max for Python backend
-        checkBackend(backendPort, 15000, (backErr) => {
-          if (backErr) {
-            log(`Backend startup check failed on port ${backendPort}: ${backErr.message}`);
-          } else {
-            log(`Backend is active on port ${backendPort}. Launching UI.`);
-          }
-          createWindow(backendPort);
-        });
-      });
+    // Wait 15 seconds max for Python backend
+    checkBackend(backendPort, 15000, (backErr) => {
+      if (backErr) {
+        log(`Backend startup check failed on port ${backendPort}: ${backErr.message}`);
+      } else {
+        log(`Backend is active on port ${backendPort}. Launching UI.`);
+      }
+      createWindow(backendPort);
     });
   });
 });

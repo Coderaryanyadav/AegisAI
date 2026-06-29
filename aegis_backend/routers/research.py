@@ -49,23 +49,25 @@ async def query_legal_rag(req: ResearchQuery, db: AsyncSession = Depends(get_db)
     chunks = vector_store.query_hybrid(req.query, limit=5, document_ids=req.matter_ids)
     safe_chunks = [c for c in chunks if not check_prompt_injection(c["content"])]
 
+    import tiktoken
+    encoder = tiktoken.get_encoding("cl100k_base")
     context = ""
-    total_words = 0
-    max_words = 6000  # Safe context buffer for local models (approx 8000 tokens)
+    total_tokens = 0
+    max_tokens = 6000  # Safe context buffer for local models (approx 8000 tokens)
     for idx, c in enumerate(safe_chunks):
         filename = c["metadata"].get("filename", "Unknown Document")
         chunk_content = c["content"]
-        chunk_words = len(chunk_content.split())
+        chunk_tokens = len(encoder.encode(chunk_content))
         
-        if total_words + chunk_words > max_words:
-            allowed_words = max_words - total_words
-            if allowed_words <= 0:
+        if total_tokens + chunk_tokens > max_tokens:
+            allowed_tokens = max_tokens - total_tokens
+            if allowed_tokens <= 0:
                 break
-            words = chunk_content.split()
-            chunk_content = " ".join(words[:allowed_words]) + " [Content truncated to fit local LLM context limits]"
-            total_words += allowed_words
+            encoded = encoder.encode(chunk_content)
+            chunk_content = encoder.decode(encoded[:allowed_tokens]) + " [Content truncated to fit local LLM context limits]"
+            total_tokens += allowed_tokens
         else:
-            total_words += chunk_words
+            total_tokens += chunk_tokens
             
         context += f"[Context {idx+1}] File: {filename}\nContent:\n{chunk_content}\n\n"
 
@@ -128,23 +130,25 @@ async def query_legal_rag_stream(
         chunks = vector_store.query_hybrid(req.query, limit=5, document_ids=req.matter_ids)
         safe_chunks = [c for c in chunks if not check_prompt_injection(c["content"])]
 
+        import tiktoken
+        encoder = tiktoken.get_encoding("cl100k_base")
         context = ""
-        total_words = 0
-        max_words = 6000  # Safe context buffer for local models (approx 8000 tokens)
+        total_tokens = 0
+        max_tokens = 6000  # Safe context buffer for local models
         for idx, c in enumerate(safe_chunks):
             filename = c["metadata"].get("filename", "Unknown Document")
             chunk_content = c["content"]
-            chunk_words = len(chunk_content.split())
+            chunk_tokens = len(encoder.encode(chunk_content))
             
-            if total_words + chunk_words > max_words:
-                allowed_words = max_words - total_words
-                if allowed_words <= 0:
+            if total_tokens + chunk_tokens > max_tokens:
+                allowed_tokens = max_tokens - total_tokens
+                if allowed_tokens <= 0:
                     break
-                words = chunk_content.split()
-                chunk_content = " ".join(words[:allowed_words]) + " [Content truncated to fit local LLM context limits]"
-                total_words += allowed_words
+                encoded = encoder.encode(chunk_content)
+                chunk_content = encoder.decode(encoded[:allowed_tokens]) + " [Content truncated to fit local LLM context limits]"
+                total_tokens += allowed_tokens
             else:
-                total_words += chunk_words
+                total_tokens += chunk_tokens
                 
             context += f"[Context {idx+1}] File: {filename}\nContent:\n{chunk_content}\n\n"
 

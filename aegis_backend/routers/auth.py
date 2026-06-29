@@ -333,16 +333,10 @@ async def refresh_token(refresh_token: str = Form(...), db: AsyncSession = Depen
     new_refresh_token = create_refresh_token(data={"sub": user.email})
     return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer", "role": user.role}
 
-from aegis_backend.core.security import oauth2_scheme, get_redis
+from aegis_backend.core.security import oauth2_scheme
 
 @router.post("/auth/logout")
 async def logout(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db), current_user = Depends(get_current_user)):
-    # 1. Blacklist token in Redis if active
-    try:
-        redis_client = await get_redis()
-        await redis_client.setex(f"revoked_token:{token}", 3600, "1")
-    except Exception:
-        pass
         
     # 2. Blacklist token in Database as persistent fallback
     from aegis_backend.database import RevokedToken

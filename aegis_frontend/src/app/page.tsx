@@ -24,6 +24,7 @@ import { BackupTab } from "../components/BackupTab";
 import { OnboardingGuide } from "../components/OnboardingGuide";
 import { LoginView } from "../components/LoginView";
 import { DocumentPreviewDrawer } from "../components/DocumentPreviewDrawer";
+import { useAppStore } from "../store/useAppStore";
 
 let API_BASE = "http://localhost:8000";
 if (typeof window !== "undefined") {
@@ -199,13 +200,8 @@ export default function Home() {
   // Onboarding
   const [showOllamaOnboarding, setShowOllamaOnboarding] = useState(false);
   
-  interface NotificationType {
-    message: string;
-    type: "success" | "error" | "info" | "warning";
-  }
-  // Global Toast Notification
-  const [notification, setNotification] = useState<NotificationType | null>(null);
-  const notificationTimeoutRef = useRef<any>(null);
+  const notification = useAppStore(state => state.notification);
+  const showNotification = useAppStore(state => state.showNotification);
 
   // Language toggle (en / hi)
   const [lang, setLang] = useState<"en" | "hi">("en");
@@ -289,16 +285,7 @@ export default function Home() {
   // Dependencies for selected entities are now handled dynamically by useQuery's queryKey.
   // Initialization
 
-  const showNotification = (message: string, type: "info" | "success" | "error" | "warning" = "info") => {
-    if (notificationTimeoutRef.current) {
-      clearTimeout(notificationTimeoutRef.current);
-    }
-    setNotification({ message, type });
-    notificationTimeoutRef.current = setTimeout(() => {
-      setNotification(null);
-      notificationTimeoutRef.current = null;
-    }, 5000);
-  };
+  // Removed local showNotification in favor of Zustand store
 
   const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
     const headers = options.headers || {};
@@ -965,7 +952,6 @@ export default function Home() {
               <CrmTab
                 API_BASE={API_BASE}
                 fetchWithAuth={fetchWithAuth}
-                showNotification={showNotification}
                 clients={clients}
                 fetchClients={() => { fetchClients(); return Promise.resolve(); }}
               />

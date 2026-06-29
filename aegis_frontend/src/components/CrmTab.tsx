@@ -5,10 +5,11 @@ import { Trash2 } from "lucide-react";
 import { ConflictChecker } from "./ConflictChecker";
 import { ClientCard } from "./ClientCard";
 
+import { useAppStore } from "../store/useAppStore";
+
 interface CrmTabProps {
   API_BASE: string;
   fetchWithAuth: (url: string, options?: any) => Promise<any>;
-  showNotification: (message: string, type?: "info" | "success" | "error" | "warning") => void;
   clients: any[];
   fetchClients: () => Promise<void>;
 }
@@ -16,10 +17,10 @@ interface CrmTabProps {
 export function CrmTab({
   API_BASE,
   fetchWithAuth,
-  showNotification,
   clients,
   fetchClients
 }: CrmTabProps) {
+  const showNotification = useAppStore((state) => state.showNotification);
   const [newClient, setNewClient] = useState({ name: "", email: "", phone: "", notes: "" });
   const [isCreatingClient, setIsCreatingClient] = useState(false);
 

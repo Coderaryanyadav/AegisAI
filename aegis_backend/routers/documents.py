@@ -19,7 +19,7 @@ logger = logging.getLogger("aegis_ai.backend")
 
 from aegis_backend.services.document_service import DocumentService
 
-@router.post("/documents/upload", response_model=DocumentResponse)
+@router.post("/documents/upload", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -74,9 +74,14 @@ async def upload_document(
         )
 
     from aegis_backend.database import cipher
-    encrypted_data = cipher.encrypt(raw_data)
-    with open(dest_path, "wb") as buffer:
-        buffer.write(encrypted_data)
+    
+    def encrypt_and_save(data: bytes, path: str):
+        encrypted = cipher.encrypt(data)
+        with open(path, "wb") as buffer:
+            buffer.write(encrypted)
+            
+    import asyncio
+    await asyncio.to_thread(encrypt_and_save, raw_data, dest_path)
 
     # Register in SQLite
     doc = Document(

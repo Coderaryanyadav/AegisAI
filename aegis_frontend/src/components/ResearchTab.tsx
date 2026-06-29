@@ -68,15 +68,45 @@ export function ResearchTab({
         body.matter_ids = [selectedMatter.id];
       }
 
-      const response = await fetchWithAuth(`${API_BASE}/api/v1/research/query`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/research/query/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
-      if (response.ok) {
-        const data = await response.json();
-        setRagResult(data.answer);
-        setRagSources(data.sources || []);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Search request failed");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let done = false;
+
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        done = doneReading;
+        if (value) {
+          const chunkValue = decoder.decode(value, { stream: true });
+          const lines = chunkValue.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6);
+              try {
+                const data = JSON.parse(dataStr);
+                if (data.chunk) {
+                  setRagResult(prev => prev + data.chunk);
+                } else if (data.response) {
+                  // Fallback for full cached response or final completion block
+                  setRagResult(prev => prev || data.response);
+                  setRagSources(data.sources || []);
+                }
+              } catch (e) {
+                // Ignore incomplete JSON chunks across boundaries
+              }
+            }
+          }
+        }
       }
     } catch (err: any) {
       showNotification(err.message, "error");

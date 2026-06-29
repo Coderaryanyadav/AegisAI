@@ -43,17 +43,12 @@ def create_refresh_token(data: dict):
 async def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
     # Check token revocation
     is_revoked = False
-    try:
-        redis_client = await get_redis()
-        if await redis_client.get(f"revoked_token:{token}"):
-            is_revoked = True
-    except Exception:
-        from aegis_backend.database import RevokedToken
-        from sqlalchemy import select
-        rev_stmt = select(RevokedToken).filter(RevokedToken.token == token)
-        rev_res = await db.execute(rev_stmt)
-        if rev_res.scalars().first():
-            is_revoked = True
+    from aegis_backend.database import RevokedToken
+    from sqlalchemy import select
+    rev_stmt = select(RevokedToken).filter(RevokedToken.token == token)
+    rev_res = await db.execute(rev_stmt)
+    if rev_res.scalars().first():
+        is_revoked = True
 
     if is_revoked:
         raise HTTPException(
@@ -107,61 +102,30 @@ def verify_lawyer_or_admin(current_user: User = Depends(get_current_user)):
         )
     return current_user
 
-import redis.asyncio as aioredis
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+import time
 
-async def get_redis():
-    return await aioredis.from_url(REDIS_URL, decode_responses=True)
+# In-memory rate limiting for offline desktop app (avoids SQLite disk thrashing)
+_auth_rate_limits = {}
 
 async def rate_limit_auth(request: Request, db: AsyncSession = Depends(get_db)):
     if os.environ.get("AEGIS_TEST_MODE") == "true":
         return
     ip = request.client.host if request.client else "127.0.0.1"
     
-    try:
-        redis_client = await get_redis()
-        key = f"rate_limit:auth:{ip}"
-        
-        current = await redis_client.get(key)
-        if current and int(current) >= 5:
+    now = time.time()
+    # Clean up old entries
+    global _auth_rate_limits
+    _auth_rate_limits = {k: v for k, v in _auth_rate_limits.items() if now - v['timestamp'] < 60}
+    
+    if ip not in _auth_rate_limits:
+        _auth_rate_limits[ip] = {'count': 1, 'timestamp': now}
+    else:
+        if _auth_rate_limits[ip]['count'] >= 5:
             raise HTTPException(
                 status_code=429,
                 detail="Too many authentication attempts. Please try again later."
             )
-        
-        pipe = redis_client.pipeline()
-        pipe.incr(key)
-        pipe.expire(key, 60, nx=True)
-        await pipe.execute()
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise
-        # Fallback to DB rate limiting using isolated session context
-        from aegis_backend.database import AuthRateLimit, AsyncSessionLocal
-        from sqlalchemy import select, func
-        import datetime
-        
-        async with AsyncSessionLocal() as local_db:
-            # Check attempts in last 60 seconds
-            one_minute_ago = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(seconds=60)
-            stmt = select(func.count(AuthRateLimit.id)).filter(
-                AuthRateLimit.ip_address == ip,
-                AuthRateLimit.timestamp >= one_minute_ago
-            )
-            res = await local_db.execute(stmt)
-            attempts = res.scalar() or 0
-            if attempts >= 5:
-                raise HTTPException(
-                    status_code=429,
-                    detail="Too many authentication attempts. Please try again later."
-                )
-            
-            # Record attempt
-            local_db.add(AuthRateLimit(ip_address=ip))
-            try:
-                await local_db.commit()
-            except Exception:
-                await local_db.rollback()
+        _auth_rate_limits[ip]['count'] += 1
 
 # Online/Offline Mode State (shared state)
 SYSTEM_ONLINE_MODE = False

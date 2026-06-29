@@ -8,6 +8,7 @@
     "dist": "electron-builder --mac"
   },
   "dependencies": {
+    "electron-serve": "^3.0.1",
     "find-process": "^1.4.7",
     "portfinder": "^1.0.32"
   },
@@ -41,7 +42,9 @@
       "category": "public.app-category.business",
       "target": [
         "dmg"
-      ]
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
     }
   }
 }

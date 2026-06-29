@@ -58,8 +58,7 @@ class DocumentProcessor:
                 logger.error(f"Error opening PDF via PyMuPDF: {e}")
                 raise ValueError(f"Failed to parse PDF document: {e}")
 
-            text_content = [page.get_text() for page in doc]
-            full_text = "\n".join(text_content).strip()
+            full_text = cls._extract_pdf_text(doc)
             
             # If we got enough text, return it directly
             if len(full_text) >= min_char_threshold:
@@ -68,43 +67,53 @@ class DocumentProcessor:
 
             # Otherwise, fall back to OCR
             logger.warning("Extracted text is empty or too short. Attempting OCR fallback...")
+            return cls._perform_ocr(doc)
             
-            if not cls.is_tesseract_available():
-                logger.warning("OCR is required for this scanned document, but Tesseract is not installed. Falling back to empty text.")
-                return ""
-
-            ocr_text_content = ["" for _ in range(len(doc))]
-            import concurrent.futures
-            
-            def process_page(page_idx):
-                logger.info(f"Running OCR on page {page_idx + 1}/{len(doc)}...")
-                page = doc[page_idx]
-                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-                image_data = pix.tobytes("png")
-                image = Image.open(io.BytesIO(image_data))
-                return pytesseract.image_to_string(image)
-                
-            # Restrict concurrency to avoid CPU starvation on multi-page OCR processes
-            max_workers = max(1, min(4, (os.cpu_count() or 2) // 2))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(process_page, i): i for i in range(len(doc))}
-                for future in concurrent.futures.as_completed(futures):
-                    page_idx = futures[future]
-                    try:
-                        ocr_text_content[page_idx] = future.result()
-                    except Exception as e:
-                        logger.error(f"OCR failed for page {page_idx + 1}: {e}")
-                        raise
-
-            full_ocr_text = "\n".join(ocr_text_content).strip()
-            logger.info("Successfully extracted text using OCR.")
-            return full_ocr_text
         finally:
             if doc:
                 try:
                     doc.close()
                 except Exception:
                     pass
+
+    @classmethod
+    def _extract_pdf_text(cls, doc) -> str:
+        text_content = [page.get_text() for page in doc]
+        return "\n".join(text_content).strip()
+
+    @classmethod
+    def _perform_ocr(cls, doc) -> str:
+        if not cls.is_tesseract_available():
+            logger.warning("OCR is required for this scanned document, but Tesseract is not installed. Falling back to empty text.")
+            return ""
+
+        ocr_text_content = ["" for _ in range(len(doc))]
+        import concurrent.futures
+        
+        def process_page(page_idx):
+            logger.info(f"Running OCR on page {page_idx + 1}/{len(doc)}...")
+            page = doc[page_idx]
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            image_data = pix.tobytes("png")
+            image = Image.open(io.BytesIO(image_data))
+            return pytesseract.image_to_string(image)
+            
+        # Restrict concurrency to avoid CPU starvation on multi-page OCR processes
+        max_workers = max(1, min(4, (os.cpu_count() or 2) // 2))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_page, i): i for i in range(len(doc))}
+            for future in concurrent.futures.as_completed(futures):
+                page_idx = futures[future]
+                try:
+                    ocr_text_content[page_idx] = future.result()
+                except Exception as e:
+                    logger.error(f"OCR failed for page {page_idx + 1}: {e}")
+                    raise
+
+        full_ocr_text = "\n".join(ocr_text_content).strip()
+        logger.info("Successfully extracted text using OCR.")
+        return full_ocr_text
+
 
 if __name__ == "__main__":
     # Quick CLI test

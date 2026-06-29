@@ -414,20 +414,21 @@ def run_migrations():
     import alembic.command
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ini_path = os.path.join(base_dir, "alembic.ini")
-    if os.path.exists(ini_path):
-        cfg = alembic.config.Config(ini_path)
-        cfg.set_main_option("script_location", os.path.join(base_dir, "alembic"))
-        cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
-        alembic.command.upgrade(cfg, "head")
-    else:
-        Base.metadata.create_all(bind=engine)
+    if not os.path.exists(ini_path):
+        raise FileNotFoundError(f"Alembic configuration not found at {ini_path}. Cannot start application.")
+        
+    cfg = alembic.config.Config(ini_path)
+    cfg.set_main_option("script_location", os.path.join(base_dir, "alembic"))
+    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+    alembic.command.upgrade(cfg, "head")
 
 def init_db():
     try:
         run_migrations()
     except Exception as e:
-        print(f"Programmatic migrations failed: {e}. Falling back to create_all.")
-        Base.metadata.create_all(bind=engine)
+        import sys
+        print(f"FATAL: Programmatic migrations failed: {e}. Exiting.")
+        sys.exit(1)
 
     # Ensure a partial unique index on case_number that only applies to non-null values
     if DATABASE_URL.startswith("sqlite"):
