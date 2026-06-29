@@ -92,6 +92,24 @@ AsyncSessionLocalRO = async_sessionmaker(autocommit=False, autoflush=False, expi
 
 
 
+# Machine-bound key encryption helpers to protect local key files at rest
+def get_machine_key() -> bytes:
+    import uuid
+    import platform
+    import hashlib
+    import base64
+    # Combine stable hardware address, node name, and OS platform
+    node_str = f"{uuid.getnode()}-{platform.node()}-{platform.system()}"
+    key_hash = hashlib.sha256(node_str.encode()).digest()
+    return base64.urlsafe_b64encode(key_hash)
+
+def encrypt_key_file(data: str | bytes) -> bytes:
+    raw_bytes = data if isinstance(data, bytes) else data.encode("utf-8")
+    return Fernet(get_machine_key()).encrypt(raw_bytes)
+
+def decrypt_key_file(encrypted_data: bytes) -> bytes:
+    return Fernet(get_machine_key()).decrypt(encrypted_data)
+
 # Cryptographic Master Key derivation (stores salt/key securely in OS keyring or fallback local file)
 KEY_PATH = os.path.join(AEGIS_DIR, ".master.key")
 
@@ -113,12 +131,21 @@ def get_secure_key(key_name: str, fallback_path: str, is_hex: bool = False):
     except Exception:
         pass
         
-    # 3. Fallback to local files (with 0600 permissions)
+    # 3. Fallback to local files (with machine-bound encryption)
     if os.path.exists(fallback_path):
         try:
-            with open(fallback_path, "r" if is_hex else "rb") as f:
-                val = f.read()
-                return val.strip() if is_hex else val
+            with open(fallback_path, "rb") as f:
+                encrypted_val = f.read()
+            try:
+                decrypted_val = decrypt_key_file(encrypted_val)
+                if is_hex:
+                    return decrypted_val.decode("utf-8").strip()
+                return decrypted_val
+            except Exception:
+                # Fallback: if it was saved unencrypted, return raw value
+                if is_hex:
+                    return encrypted_val.decode("utf-8").strip()
+                return encrypted_val
         except Exception:
             pass
             
@@ -138,9 +165,9 @@ def get_secure_key(key_name: str, fallback_path: str, is_hex: bool = False):
         
     # Store to local file as backup fallback
     try:
-        mode = "w" if is_hex else "wb"
-        with open(fallback_path, mode) as f:
-            f.write(new_key)
+        encrypted_val = encrypt_key_file(new_key)
+        with open(fallback_path, "wb") as f:
+            f.write(encrypted_val)
         try:
             os.chmod(fallback_path, 0o600)
         except Exception:

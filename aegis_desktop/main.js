@@ -157,12 +157,23 @@ function startBackend(port) {
     pythonArgs = ['-m', 'aegis_backend.main', '--port', port.toString()];
   }
 
+  // Validate path boundaries for security
+  const resolvedPath = path.resolve(pythonExecutable);
+  if (!app.isPackaged && !resolvedPath.startsWith(path.resolve(cwd))) {
+    log(`Security Warning: Python executable path resolves outside of sandbox: ${resolvedPath}`);
+  }
+
   log(`Spawning backend: ${pythonExecutable} ${pythonArgs.join(' ')}`);
 
   try {
     backendProcess = spawn(pythonExecutable, pythonArgs, {
       cwd: cwd,
-      env: { ...process.env, PORT: port.toString(), PYTHONUNBUFFERED: '1' }
+      env: { 
+        ...process.env, 
+        PORT: port.toString(), 
+        PYTHONUNBUFFERED: '1',
+        AEGIS_CORS_ORIGINS: `http://localhost:${staticServerPort},http://127.0.0.1:${staticServerPort}`
+      }
     });
 
     backendProcess.stdout.on('data', (data) => {
