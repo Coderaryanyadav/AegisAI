@@ -22,6 +22,8 @@ import { AnalyticsTab } from "../components/AnalyticsTab";
 import { SettingsTab } from "../components/SettingsTab";
 import { BackupTab } from "../components/BackupTab";
 import { OnboardingGuide } from "../components/OnboardingGuide";
+import { LoginView } from "../components/LoginView";
+import { DocumentPreviewDrawer } from "../components/DocumentPreviewDrawer";
 
 let API_BASE = "http://localhost:8000";
 if (typeof window !== "undefined") {
@@ -526,118 +528,23 @@ export default function Home() {
 
   // Auth Guard
   if (!token) {
-    useEffect(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("aegis_lang");
-      if (saved === "hi") setLang("hi");
-    }
-  }, []);
-
-  useEffect(() => {
-    if (currentUser) {
-      const role = currentUser.role || "lawyer";
-      const allowed = ALLOWED_TABS[role] || ALLOWED_TABS.lawyer;
-      if (!allowed.includes(activeTab)) {
-        setActiveTab(allowed[0]);
-      }
-    }
-  }, [currentUser, activeTab]);
-
-  useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-  }, []);
-
-  useEffect(() => {
-    if (token) {
-      fetchCurrentUser(token);
-    }
-  }, [token]);
-
-  return (
-      <div className="min-h-screen flex items-center justify-center relative p-4 bg-[#030303] overflow-hidden bg-radial-glow">
-        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-zinc-800/10 opacity-30 blur-[130px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-zinc-800/15 opacity-20 blur-[130px]" />
-        
-        <div className="w-full max-w-md glass-panel p-8 rounded-2xl animate-fade-in z-10 shadow-2xl relative border border-zinc-850">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-[1px] bg-gradient-to-r from-transparent via-zinc-400/40 to-transparent" />
-          
-          <div className="flex flex-col items-center mb-8">
-            <div className="p-3.5 bg-zinc-950 border border-zinc-800/80 rounded-2xl mb-3 shadow-inner relative animate-pulse-glow">
-              <Shield className="w-8 h-8 text-white filter drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
-            </div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-white premium-gradient-text">AegisAI</h1>
-            <p className="text-xs font-semibold text-zinc-400 mt-1 uppercase tracking-widest font-mono">Offline Security Vault</p>
-          </div>
-
-          <form onSubmit={isRegisterMode ? handleRegister : handleLogin} className="space-y-5">
-            <div>
-              <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">Advocate Email Address</label>
-              <input 
-                type="email" 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="advocate@firm.local"
-                className="w-full p-3 rounded-lg glass-input text-zinc-200 text-sm focus:border-zinc-500 font-medium bg-zinc-950 border border-zinc-805"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">Master Security PIN / Password</label>
-              <input 
-                type="password" 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full p-3 rounded-lg glass-input text-zinc-200 text-sm focus:border-zinc-500 bg-zinc-950 border border-zinc-805"
-                required
-              />
-            </div>
-
-            {/* Security Role dropdown removed to prevent self-assigned admin roles */}
-
-            {twoFactorRequired && (
-              <div>
-                <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">Two-Factor Authentication Code (TOTP)</label>
-                <input 
-                  type="text" 
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value)}
-                  placeholder="Enter 6-digit code"
-                  className="w-full p-3 rounded-lg glass-input text-zinc-200 text-sm focus:border-zinc-500 font-medium bg-zinc-950 border border-zinc-805"
-                  required
-                />
-              </div>
-            )}
-
-            <button 
-              type="submit" 
-              className="w-full py-3 bg-white hover:bg-zinc-200 text-black font-semibold rounded-lg text-sm transition-all duration-300 transform active:scale-[0.99] shadow-lg shadow-white/5 cursor-pointer flex items-center justify-center gap-2 font-bold"
-            >
-              <Lock className="w-4 h-4" />
-              {isRegisterMode ? "Create Desktop Account" : twoFactorRequired ? "Verify Code & Enter" : "Access Security Vault"}
-            </button>
-          </form>
-
-          <div className="mt-6 pt-6 border-t border-zinc-900 flex flex-col space-y-3.5 text-center">
-            <button 
-              onClick={() => setIsRegisterMode(!isRegisterMode)}
-              className="text-xs text-zinc-400 hover:text-zinc-200 transition font-medium cursor-pointer"
-            >
-              {isRegisterMode ? "Already registered? Sign in here" : "Need to initialize first client? Register here"}
-            </button>
-          </div>
-          
-          <div className="mt-6 text-center">
-            <span className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest bg-zinc-900/50 px-2.5 py-1 rounded-full border border-zinc-900">
-              🔒 Local Device Sandbox: 100% Encrypted
-            </span>
-          </div>
-        </div>
-      </div>
+    return (
+      <LoginView
+        email={email}
+        setEmail={setEmail}
+        password={password}
+        setPassword={setPassword}
+        isRegisterMode={isRegisterMode}
+        setIsRegisterMode={setIsRegisterMode}
+        twoFactorRequired={twoFactorRequired}
+        totpCode={totpCode}
+        setTotpCode={setTotpCode}
+        handleLogin={handleLogin}
+        handleRegister={handleRegister}
+      />
     );
   }
+
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -1168,132 +1075,23 @@ export default function Home() {
         </div>
 
         {/* Extracted Text Preview Drawer Modal */}
-        {showPreviewModal && (
-          <div className="fixed inset-0 bg-black/80 backdrop-filter backdrop-blur-sm flex items-center justify-end z-50 animate-fade-in animate-duration-200">
-            <div className="w-full max-w-4xl h-screen glass-panel p-6 flex flex-col justify-between shadow-2xl relative bg-zinc-950 border-l border-zinc-900">
-              <div className="absolute top-0 left-0 w-[1px] h-full bg-gradient-to-b from-transparent via-zinc-800 to-transparent" />
-              
-              <div className="space-y-4 flex-1 flex flex-col min-h-0">
-                <div className="flex justify-between items-center border-b border-zinc-900/60 pb-3">
-                  <div className="truncate">
-                    <h2 className="text-sm font-bold text-white font-mono truncate">{previewDoc?.original_name}</h2>
-                    <span className="text-[10px] text-zinc-500 font-mono">EXTRACTED EVIDENCE TEXT & ANNOTATIONS</span>
-                  </div>
-                  <button 
-                    onClick={handleClosePreview}
-                    className="text-zinc-400 hover:text-white px-3 py-1.5 border border-zinc-850 rounded-lg text-xs font-medium cursor-pointer bg-zinc-900 hover:bg-zinc-800 transition"
-                  >
-                    Close Drawer
-                  </button>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-0">
-                  {/* Column 1: Document text viewer */}
-                  <div className="flex flex-col min-h-0 h-full">
-                    <span className="text-[10px] text-zinc-500 font-mono mb-2 uppercase">Document Text</span>
-                    <div className="flex-1 overflow-y-auto bg-zinc-955 p-4 rounded-xl border border-zinc-900 font-mono text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed select-text">
-                      {previewLoading ? (
-                        <div className="flex items-center justify-center h-full gap-2 text-zinc-500 italic">
-                          <RefreshCw className="w-4 h-4 animate-spin text-zinc-500" /> Loading text extraction...
-                        </div>
-                      ) : (
-                        previewText || "No text content extracted."
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Column 2: Annotation sidebar */}
-                  <div className="flex flex-col min-h-0 h-full border-l border-zinc-900/60 pl-4 space-y-4">
-                    <span className="text-[10px] text-zinc-500 font-mono uppercase">Notes & Annotations</span>
-                    
-                    {/* Add annotation */}
-                    <div className="space-y-3 p-3 bg-zinc-900/20 border border-zinc-900 rounded-xl text-xs">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold text-zinc-300">Add Sticky Highlight</span>
-                        <button 
-                          onClick={() => {
-                            const sel = window.getSelection()?.toString();
-                            if (sel) {
-                              setNewAnnotationText(sel);
-                              showNotification("Selection grabbed!", "success");
-                            } else {
-                              showNotification("Select text in the preview window first", "warning");
-                            }
-                          }}
-                          className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-[10px] font-semibold cursor-pointer"
-                        >
-                          Grab Selected Text
-                        </button>
-                      </div>
-                      
-                      <textarea 
-                        value={newAnnotationText} 
-                        onChange={e => setNewAnnotationText(e.target.value)}
-                        placeholder="Selected text segment..." 
-                        rows={2}
-                        className="w-full p-2 text-xs rounded-lg glass-input text-zinc-200 resize-none font-mono bg-zinc-950 border border-zinc-805"
-                      />
-                      
-                      <input 
-                        value={newAnnotationNote} 
-                        onChange={e => setNewAnnotationNote(e.target.value)}
-                        placeholder="Type sticky note comment here..." 
-                        className="w-full p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805"
-                      />
-
-                      <div className="flex justify-between items-center">
-                        <div className="flex gap-2">
-                          {["yellow", "green", "pink"].map(c => (
-                            <button 
-                              key={c} 
-                              onClick={() => setAnnotationColor(c)}
-                              className={`w-4 h-4 rounded-full border cursor-pointer ${annotationColor === c ? "border-white scale-110" : "border-transparent"}`}
-                              style={{ backgroundColor: c === "yellow" ? "#eab308" : c === "green" ? "#22c55e" : "#ec4899" }}
-                            />
-                          ))}
-                        </div>
-                        
-                        <button 
-                          onClick={handleSaveAnnotation}
-                          disabled={!newAnnotationText.trim()}
-                          className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-300 disabled:opacity-50 text-zinc-900 font-bold rounded-lg text-[10px] transition cursor-pointer"
-                        >
-                          Save Highlight
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Annotations List */}
-                    <div className="flex-1 overflow-y-auto space-y-2">
-                      <span className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider block font-mono">Saved Highlights</span>
-                      {docAnnotations.map((ann) => (
-                        <div 
-                          key={ann.id} 
-                          className="p-3 border rounded-xl text-xs space-y-1 bg-zinc-950/20"
-                          style={{ borderColor: ann.color === "yellow" ? "#854d0e" : ann.color === "green" ? "#166534" : "#9d174d" }}
-                        >
-                          <div className="flex justify-between items-start gap-2">
-                            <span className="font-mono text-[10px] font-semibold italic bg-zinc-900 px-1 py-0.5 rounded truncate" style={{ color: ann.color === "yellow" ? "#fef08a" : ann.color === "green" ? "#bbf7d0" : "#fbcfe8" }}>
-                              &quot;{ann.selected_text}&quot;
-                            </span>
-                            <button onClick={() => handleDeleteAnnotation(ann.id)} className="text-zinc-650 hover:text-rose-400 shrink-0 cursor-pointer">
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                          {ann.note && <p className="text-zinc-300 font-sans text-xs">{ann.note}</p>}
-                          <p className="text-[9px] text-zinc-600 font-mono">{new Date(ann.created_at).toLocaleTimeString()}</p>
-                        </div>
-                      ))}
-                      {docAnnotations.length === 0 && (
-                        <p className="text-xs text-zinc-550 italic text-center py-4">No highlights on this document yet.</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <DocumentPreviewDrawer
+          showPreviewModal={showPreviewModal}
+          previewDoc={previewDoc}
+          previewText={previewText}
+          previewLoading={previewLoading}
+          docAnnotations={docAnnotations}
+          newAnnotationText={newAnnotationText}
+          setNewAnnotationText={setNewAnnotationText}
+          newAnnotationNote={newAnnotationNote}
+          setNewAnnotationNote={setNewAnnotationNote}
+          annotationColor={annotationColor}
+          setAnnotationColor={setAnnotationColor}
+          handleClosePreview={handleClosePreview}
+          handleSaveAnnotation={handleSaveAnnotation}
+          handleDeleteAnnotation={handleDeleteAnnotation}
+          showNotification={showNotification}
+        />
 
         {/* Ollama Troubleshooting & Onboarding On-Click Modal */}
         {showOllamaOnboarding && (
