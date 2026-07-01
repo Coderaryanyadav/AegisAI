@@ -5,6 +5,291 @@ import {
   RefreshCw, Play, Download, Clock, FileText, 
   Mic, MicOff, AlertTriangle 
 } from "lucide-react";
+import { VirtualizedList } from "./VirtualizedList";
+
+interface GraphNode {
+  id: string;
+  label: string;
+  type: "actor" | "event" | "date";
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+}
+
+interface GraphLink {
+  source: string;
+  target: string;
+}
+
+function ChronologyGraph({ timeline }: { timeline: any[] }) {
+  const [nodes, setNodes] = useState<GraphNode[]>([]);
+  const [links, setLinks] = useState<GraphLink[]>([]);
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
+  const simulationRef = useRef<number | null>(null);
+  const nodesRef = useRef<GraphNode[]>([]);
+
+  // 1. Build nodes and links from timeline data
+  useEffect(() => {
+    const localNodes: GraphNode[] = [];
+    const localLinks: GraphLink[] = [];
+    const nodeMap = new Map<string, string>();
+
+    const addNode = (id: string, label: string, type: "actor" | "event" | "date") => {
+      const key = `${type}:${id}`;
+      if (!nodeMap.has(key)) {
+        nodeMap.set(key, key);
+        const existing = nodesRef.current.find(n => n.id === key);
+        localNodes.push({
+          id: key,
+          label,
+          type,
+          x: existing ? existing.x : Math.random() * 500 + 150,
+          y: existing ? existing.y : Math.random() * 300 + 100,
+          vx: 0,
+          vy: 0
+        });
+      }
+      return key;
+    };
+
+    timeline.forEach((item, index) => {
+      const eventId = addNode(`event_${index}`, item.description || item.event || "Event", "event");
+      
+      if (item.date || item.timestamp) {
+        const d = item.date || item.timestamp;
+        const dateId = addNode(d, d, "date");
+        localLinks.push({ source: dateId, target: eventId });
+      }
+
+      if (item.involved_parties) {
+        const actors = item.involved_parties.split(/, | and /i);
+        actors.forEach((actor: string) => {
+          const cleaned = actor.trim();
+          if (cleaned && cleaned.length > 1) {
+            const actorId = addNode(cleaned, cleaned, "actor");
+            localLinks.push({ source: actorId, target: eventId });
+          }
+        });
+      }
+    });
+
+    nodesRef.current = localNodes;
+    setNodes(localNodes);
+    setLinks(localLinks);
+  }, [timeline]);
+
+  // 2. Physics Simulation Loop
+  useEffect(() => {
+    const runSimulation = () => {
+      const currentNodes = nodesRef.current;
+      if (currentNodes.length === 0) return;
+
+      const kRepulsion = 1500;
+      const kAttraction = 0.08;
+      const centerForce = 0.015;
+      const centerX = 400;
+      const centerY = 220;
+
+      // Friction
+      currentNodes.forEach(n => {
+        n.vx *= 0.85;
+        n.vy *= 0.85;
+      });
+
+      // Repulsion force between all node pairs
+      for (let i = 0; i < currentNodes.length; i++) {
+        for (let j = i + 1; j < currentNodes.length; j++) {
+          const n1 = currentNodes[i];
+          const n2 = currentNodes[j];
+          const dx = n2.x - n1.x;
+          const dy = n2.y - n1.y;
+          const distSq = dx * dx + dy * dy + 0.1;
+          const dist = Math.sqrt(distSq);
+          if (dist < 200) {
+            const force = kRepulsion / distSq;
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+            n1.vx -= fx;
+            n1.vy -= fy;
+            n2.vx += fx;
+            n2.vy += fy;
+          }
+        }
+      }
+
+      // Attraction force along links
+      links.forEach(link => {
+        const sourceNode = currentNodes.find(n => n.id === link.source);
+        const targetNode = currentNodes.find(n => n.id === link.target);
+        if (sourceNode && targetNode) {
+          const dx = targetNode.x - sourceNode.x;
+          const dy = targetNode.y - sourceNode.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+          const force = kAttraction * (dist - 120);
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+          sourceNode.vx += fx;
+          sourceNode.vy += fy;
+          targetNode.vx -= fx;
+          targetNode.vy -= fy;
+        }
+      });
+
+      // Center gravity force
+      currentNodes.forEach(n => {
+        n.vx += (centerX - n.x) * centerForce;
+        n.vy += (centerY - n.y) * centerForce;
+      });
+
+      // Update positions
+      currentNodes.forEach(n => {
+        if (n.id === draggedNodeId) return;
+        n.x += n.vx;
+        n.y += n.vy;
+        
+        n.x = Math.max(40, Math.min(760, n.x));
+        n.y = Math.max(40, Math.min(410, n.y));
+      });
+
+      setNodes([...currentNodes]);
+      simulationRef.current = requestAnimationFrame(runSimulation);
+    };
+
+    simulationRef.current = requestAnimationFrame(runSimulation);
+    return () => {
+      if (simulationRef.current) cancelAnimationFrame(simulationRef.current);
+    };
+  }, [links, draggedNodeId]);
+
+  const handleMouseDown = (nodeId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    setDraggedNodeId(nodeId);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!draggedNodeId) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const node = nodesRef.current.find(n => n.id === draggedNodeId);
+    if (node) {
+      node.x = x;
+      node.y = y;
+      node.vx = 0;
+      node.vy = 0;
+    }
+  };
+
+  const handleMouseUp = () => {
+    setDraggedNodeId(null);
+  };
+
+  const isHighlighted = (nodeId: string) => {
+    if (!selectedNode) return true;
+    if (selectedNode === nodeId) return true;
+    return links.some(l => 
+      (l.source === selectedNode && l.target === nodeId) ||
+      (l.target === selectedNode && l.source === nodeId)
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center bg-zinc-950 p-2.5 rounded-lg border border-zinc-900">
+        <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">
+          🔗 Click node to select. Drag to adjust physics relationships.
+        </span>
+        {selectedNode && (
+          <button 
+            onClick={() => setSelectedNode(null)} 
+            className="text-[10px] text-rose-450 hover:text-rose-350 font-bold cursor-pointer"
+          >
+            Clear Selection
+          </button>
+        )}
+      </div>
+      <div className="relative border border-zinc-800 bg-[#060608] rounded-xl overflow-hidden shadow-inner">
+        <svg 
+          width="100%" 
+          height="450" 
+          viewBox="0 0 800 450"
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          className="select-none"
+        >
+          {links.map((link, idx) => {
+            const sNode = nodes.find(n => n.id === link.source);
+            const tNode = nodes.find(n => n.id === link.target);
+            if (!sNode || !tNode) return null;
+            
+            const active = isHighlighted(sNode.id) && isHighlighted(tNode.id);
+            return (
+              <line
+                key={idx}
+                x1={sNode.x}
+                y1={sNode.y}
+                x2={tNode.x}
+                y2={tNode.y}
+                stroke={active ? "#4f46e5" : "#27272a"}
+                strokeWidth={active ? 2 : 1}
+                strokeDasharray={active ? "" : "3 3"}
+                className="transition-colors duration-200"
+              />
+            );
+          })}
+
+          {nodes.map(node => {
+            const active = isHighlighted(node.id);
+            const isSelected = selectedNode === node.id;
+            
+            let color = "#3f3f46";
+            if (node.type === "actor") {
+              color = "#0284c7";
+            } else if (node.type === "date") {
+              color = "#d97706";
+            } else if (node.type === "event") {
+              color = "#4f46e5";
+            }
+
+            return (
+              <g
+                key={node.id}
+                transform={`translate(${node.x}, ${node.y})`}
+                onMouseDown={(e) => handleMouseDown(node.id, e)}
+                onClick={() => setSelectedNode(selectedNode === node.id ? null : node.id)}
+                className="cursor-pointer"
+                style={{ opacity: active ? 1 : 0.2 }}
+              >
+                <circle
+                  r={node.type === "event" ? 8 : 10}
+                  fill={color}
+                  stroke={isSelected ? "#ffffff" : "#09090b"}
+                  strokeWidth={2}
+                  className="transition-all duration-300 filter drop-shadow-[0_0_4px_rgba(255,255,255,0.1)] hover:scale-110"
+                />
+                
+                <text
+                  y={22}
+                  textAnchor="middle"
+                  fill={active ? "#f4f4f5" : "#a1a1aa"}
+                  fontSize="10"
+                  fontWeight={node.type === "event" ? "normal" : "bold"}
+                  className="font-sans filter drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]"
+                >
+                  {node.label.length > 25 ? `${node.label.slice(0, 22)}...` : node.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
 
 interface AnalyzerTabProps {
   API_BASE: string;
@@ -34,6 +319,7 @@ export function AnalyzerTab({
   const [analyzerTimeline, setAnalyzerTimeline] = useState<any[]>([]);
   const [analyzerFacts, setAnalyzerFacts] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "graph">("list");
 
   // FIR states
   const [firDocIds, setFirDocIds] = useState<number[]>([]);
@@ -491,21 +777,50 @@ export function AnalyzerTab({
           
           {/* Timeline */}
           <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
-            <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-zinc-400" /> Chronological Event Timeline
-            </h3>
-            <div className="space-y-4 relative border-l border-zinc-800 pl-4 ml-2 max-h-[450px] overflow-y-auto pt-2">
-              {analyzerTimeline.map((item, idx) => (
-                <div key={idx} className="relative space-y-1">
-                  <div className="absolute top-1.5 left-[-21px] w-2.5 h-2.5 rounded-full bg-zinc-700 border border-zinc-950" />
-                  <span className="text-[10px] font-bold font-mono text-zinc-500">{item.date || "Date Unspecified"}</span>
-                  <h4 className="text-xs font-semibold text-zinc-205">{item.description}</h4>
-                  {item.involved_parties && (
-                    <p className="text-[10px] text-zinc-400 italic">Parties: {item.involved_parties}</p>
-                  )}
-                </div>
-              ))}
+            <div className="flex justify-between items-center">
+              <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-zinc-400" /> Chronological Event Timeline
+              </h3>
+              <div className="flex bg-zinc-950 p-1 rounded-lg border border-zinc-900 text-[10px] font-bold">
+                <button
+                  onClick={() => setViewMode("list")}
+                  className={`px-3 py-1 rounded-md transition ${viewMode === "list" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"}`}
+                >
+                  List
+                </button>
+                <button
+                  onClick={() => setViewMode("graph")}
+                  className={`px-3 py-1 rounded-md transition ${viewMode === "graph" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"}`}
+                >
+                  Interactive Graph
+                </button>
+              </div>
             </div>
+
+            {viewMode === "list" ? (
+              analyzerTimeline.length === 0 ? (
+                <div className="text-xs text-zinc-500 italic">No timeline events extracted.</div>
+              ) : (
+                <VirtualizedList
+                  items={analyzerTimeline}
+                  itemHeight={72}
+                  height={Math.min(analyzerTimeline.length * 72, 450)}
+                  className="border-l border-zinc-800 pl-4 ml-2 pt-2"
+                  renderItem={(item, idx) => (
+                    <div className="relative space-y-1 pb-2">
+                      <div className="absolute top-1.5 left-[-21px] w-2.5 h-2.5 rounded-full bg-zinc-700 border border-zinc-950" />
+                      <span className="text-[10px] font-bold font-mono text-zinc-500">{item.date || "Date Unspecified"}</span>
+                      <h4 className="text-xs font-semibold text-zinc-205">{item.description}</h4>
+                      {item.involved_parties && (
+                        <p className="text-[10px] text-zinc-400 italic">Parties: {item.involved_parties}</p>
+                      )}
+                    </div>
+                  )}
+                />
+              )
+            ) : (
+              <ChronologyGraph timeline={analyzerTimeline} />
+            )}
           </div>
 
           {/* Fact sheet */}

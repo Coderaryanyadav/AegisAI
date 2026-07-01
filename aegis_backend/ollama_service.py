@@ -3,7 +3,9 @@ import json
 import logging
 from typing import List, Dict, Any, Optional
 import os
+from fastapi import HTTPException, status
 from aegis_backend.core.http_client import get_http_client
+from aegis_backend.core.memory_guard import MemoryGuard
 
 logger = logging.getLogger("aegis_ai.ollama_service")
 
@@ -37,6 +39,10 @@ class OllamaService:
         temperature: float = 0.2
     ) -> str:
         """Sends a text completion request to the local Ollama model."""
+        allowed, reason = MemoryGuard.check_inference_allowed()
+        if not allowed:
+            raise HTTPException(status_code=503, detail=reason)
+
         try:
             available = await cls.get_available_models()
         except Exception as e:
@@ -188,6 +194,11 @@ class OllamaService:
         temperature: float = 0.2
     ):
         """Sends a text completion request to the local Ollama model and streams response."""
+        allowed, reason = MemoryGuard.check_inference_allowed()
+        if not allowed:
+            yield f"Error: {reason}"
+            return
+
         try:
             available = await cls.get_available_models()
         except Exception:

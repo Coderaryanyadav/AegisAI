@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>AegisAI - Starting</title>
+  <title>AegisAI - Select Workspace</title>
   <style>
     body {
       background-color: #09090b;
@@ -24,6 +24,7 @@
       border-left-color: #fafafa;
       animation: spin 1s linear infinite;
       margin-bottom: 20px;
+      display: none;
     }
     @keyframes spin {
       0% { transform: rotate(0deg); }
@@ -37,12 +38,45 @@
     p {
       color: #a1a1aa;
       font-size: 14px;
+      margin-bottom: 24px;
+    }
+    button {
+      background-color: #fafafa;
+      color: #09090b;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #e4e4e7;
     }
   </style>
 </head>
 <body>
-  <div class="spinner"></div>
+  <div class="spinner" id="spinner"></div>
   <h1>AegisAI</h1>
-  <p>Initializing local AI engines...</p>
+  <p id="status-text">Select a workspace folder to begin.</p>
+  <button id="select-workspace-btn">Open Workspace</button>
+
+  <script>
+    document.getElementById('select-workspace-btn').addEventListener('click', async () => {
+      try {
+        const dir = await window.aegisElectron.invoke('dialog:openDirectory');
+        if (dir) {
+          document.getElementById('select-workspace-btn').style.display = 'none';
+          document.getElementById('spinner').style.display = 'block';
+          document.getElementById('status-text').innerText = 'Initializing local AI engines...';
+          
+          window.aegisElectron.send('workspace:selected', dir);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    });
+  </script>
 </body>
 </html>

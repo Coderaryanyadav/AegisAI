@@ -10,46 +10,56 @@ logger = logging.getLogger("aegis_ai.backend")
 
 class DocumentService:
     @staticmethod
-    def chunk_text(text: str, chunk_size: int = 400, chunk_overlap: int = 80) -> List[str]:
-        """Helper to split document text into dense context chunks."""
-        words = text.split()
-        chunks = []
-        i = 0
-        while i < len(words):
-            chunk_words = words[i:i + chunk_size]
-            chunks.append(" ".join(chunk_words))
-            i += chunk_size - chunk_overlap
-            if i >= len(words):
-                break
-        return chunks
+    def chunk_text(text: str, chunk_size: int = 400, chunk_overlap: int = 80, document_name: str = "") -> List[str]:
+        """Helper to split document text into dense context chunks using legal structure awareness."""
+        from aegis_backend.core.legal_chunker import LegalChunker
+        return LegalChunker.split_legal_text(text, document_name, chunk_size, chunk_overlap)
 
     @staticmethod
-    def decrypt_and_extract(file_path: str, original_name: str) -> str:
-        """Synchronous CPU-bound parsing function run in a separate thread."""
+    def process_document_sync(dest_path: str, original_name: str, tmp_path: str = None) -> str:
+        """Synchronous CPU-bound parsing function run in a separate thread.
+        If tmp_path is provided (new upload), it encrypts the plaintext tmp_path into dest_path.
+        Otherwise (reprocessing), it decrypts dest_path.
+        """
         from aegis_backend.database import cipher
         import tempfile
         
-        # Decrypt binary file
-        with open(file_path, "rb") as enc_file:
-            encrypted_data = enc_file.read()
-        raw_data = cipher.decrypt(encrypted_data)
+        if tmp_path and os.path.exists(tmp_path):
+            # Encrypt plaintext to vault
+            with open(tmp_path, "rb") as f_in:
+                raw_data = f_in.read()
+            encrypted_data = cipher.encrypt(raw_data)
+            with open(dest_path, "wb") as f_out:
+                f_out.write(encrypted_data)
+        else:
+            # Decrypt existing vault file
+            with open(dest_path, "rb") as enc_file:
+                encrypted_data = enc_file.read()
+            raw_data = cipher.decrypt(encrypted_data)
+            tmp_path = None
 
         if original_name.lower().endswith(".txt"):
             text = raw_data.decode("utf-8", errors="ignore")
         else:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(raw_data)
-                tmp_path = tmp.name
+            working_path = tmp_path
+            created_tmp = False
+            if not working_path:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    tmp.write(raw_data)
+                    working_path = tmp.name
+                    created_tmp = True
 
             try:
                 # Extract text using PyMuPDF or Tesseract fallback
-                text = DocumentProcessor.extract_text(tmp_path)
+                text = DocumentProcessor.extract_text(working_path)
             finally:
-                if os.path.exists(tmp_path):
+                if created_tmp and os.path.exists(working_path):
+                    os.remove(working_path)
+                elif tmp_path and os.path.exists(tmp_path):
                     os.remove(tmp_path)
         
         # Save raw content in local file system encrypted
-        raw_text_path = file_path + ".txt"
+        raw_text_path = dest_path + ".txt"
         encrypted_text = cipher.encrypt(text.encode('utf-8'))
         with open(raw_text_path, "wb") as f:
             f.write(encrypted_text)
@@ -57,7 +67,7 @@ class DocumentService:
         return text
 
     @staticmethod
-    async def process_uploaded_document_task(doc_id: int, file_path: str):
+    async def process_uploaded_document_task(doc_id: int, file_path: str, tmp_path: str = None):
         """Background task to extract and vector-index documents asynchronously."""
         async with AsyncSessionLocal() as db:
             from sqlalchemy import select
@@ -71,11 +81,11 @@ class DocumentService:
             await db.commit()
 
             try:
-                # Offload heavy decryption & extraction to thread pool to avoid blocking event loop
-                text = await asyncio.to_thread(DocumentService.decrypt_and_extract, file_path, doc.original_name)
+                # Offload heavy encryption & extraction to thread pool to avoid blocking event loop
+                text = await asyncio.to_thread(DocumentService.process_document_sync, file_path, doc.original_name, tmp_path)
                 
                 # Chunk text
-                chunks = DocumentService.chunk_text(text)
+                chunks = DocumentService.chunk_text(text, document_name=doc.original_name)
                 vector_chunks = []
                 for i, chunk in enumerate(chunks):
                     vector_chunks.append({

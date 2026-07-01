@@ -34,6 +34,27 @@ def test_chunk_text():
     assert len(first_chunk_words) <= 400
     assert first_chunk_words[-1] == "word"
 
+def test_legal_chunker_structure():
+    text = """
+    Chapter I: Preliminary
+    Section 1: Short title and commencement.
+    This is the first section of the document.
+    Section 2: Definitions.
+    In this Act, unless the context otherwise requires, definition A means B.
+    Clause 2.1: Definition of advocate.
+    Advocate means a legal practitioner.
+    """
+    chunks = DocumentService.chunk_text(text, chunk_size=100, chunk_overlap=10, document_name="act.pdf")
+    assert len(chunks) >= 3
+    # Check prefixes
+    assert "[Doc: act.pdf]" in chunks[0]
+    assert "[Chapter I]" in chunks[0]
+    
+    assert "[Section 1]" in chunks[1]
+    assert "[Section 2]" in chunks[2]
+    
+    assert "[Clause 2.1]" in chunks[3]
+
 def test_indian_legal_helper_convert_section():
     # IPC to BNS
     res_ipc = IndianLegalHelper.convert_section("ipc", "302")
@@ -69,6 +90,39 @@ def test_indian_legal_helper_normalize_citation():
     # Fallback normalization
     norm_fallback = IndianLegalHelper.normalize_citation("random citation string")
     assert norm_fallback == "random-citation-string"
+
+def test_indian_legal_helper_detect_statutory_citations():
+    text = (
+        "The accused was charged under Section 302 of the IPC. "
+        "FIR registered under S. 154 CrPC. Also see BNS Section 101."
+    )
+    citations = IndianLegalHelper.detect_statutory_citations(text)
+    assert len(citations) >= 2
+    acts = {c["act"] for c in citations}
+    assert "IPC" in acts or "CRPC" in acts
+
+def test_backup_manager_hmac_integrity():
+    from aegis_backend.backup_manager import BackupManager, BACKUP_MAGIC, HMAC_SIZE
+    payload = b"encrypted-test-payload"
+    signed = BackupManager._pack_signed_backup(payload)
+    assert signed.startswith(BACKUP_MAGIC)
+    assert len(signed) == len(BACKUP_MAGIC) + HMAC_SIZE + len(payload)
+    restored = BackupManager._unpack_signed_backup(signed)
+    assert restored == payload
+
+    tampered = bytearray(signed)
+    tampered[-1] ^= 0xFF
+    with pytest.raises(ValueError, match="integrity check failed"):
+        BackupManager._unpack_signed_backup(bytes(tampered))
+
+def test_memory_guard_stats():
+    from aegis_backend.core.memory_guard import MemoryGuard
+    stats = MemoryGuard.get_memory_stats()
+    assert "available_mb" in stats
+    assert "total_mb" in stats
+    allowed, reason = MemoryGuard.check_inference_allowed(required_mb=1)
+    assert allowed is True
+    assert reason == "OK"
 
 def test_password_hashing():
     pw = "SuperSecurePassword123"

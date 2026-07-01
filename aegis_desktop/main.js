@@ -76,8 +76,8 @@ function checkBackend(port, timeoutMs, callback) {
   check();
 }
 
-function startBackend(port) {
-  log(`Starting FastAPI backend process on port ${port}...`);
+function startBackend(port, workspaceDir) {
+  log(`Starting FastAPI backend process on port ${port} for workspace ${workspaceDir}...`);
   
   let pythonExecutable = 'python3';
   let pythonArgs = [];
@@ -101,7 +101,6 @@ function startBackend(port) {
     pythonArgs = ['-m', 'aegis_backend.main', '--port', port.toString()];
   }
 
-  // Validate path boundaries for security
   const resolvedPath = path.resolve(pythonExecutable);
   if (!app.isPackaged && !resolvedPath.startsWith(path.resolve(cwd))) {
     log(`Security Warning: Python executable path resolves outside of sandbox: ${resolvedPath}`);
@@ -116,7 +115,8 @@ function startBackend(port) {
         ...process.env, 
         PORT: port.toString(), 
         PYTHONUNBUFFERED: '1',
-        AEGIS_CORS_ORIGINS: `http://localhost:${staticServerPort},http://127.0.0.1:${staticServerPort}`
+        AEGIS_CORS_ORIGINS: `http://localhost:${staticServerPort},http://127.0.0.1:${staticServerPort}`,
+        AEGIS_WORKSPACE_DIR: workspaceDir
       }
     });
 
@@ -147,7 +147,8 @@ function createSplash() {
     show: false,
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
     }
   });
   splashWindow.loadFile(path.join(__dirname, 'splash.html'));
@@ -160,13 +161,15 @@ function createSplash() {
 }
 
 function createWindow(backendPort) {
+  const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
     title: 'AegisAI Offline Legal Suite',
     width: 1366,
     height: 900,
     minWidth: 1024,
     minHeight: 768,
-    frame: true,
+    frame: false,
+    titleBarStyle: isMac ? 'hiddenInset' : 'default',
     show: false,
     webPreferences: {
       nodeIntegration: false,
@@ -203,16 +206,28 @@ function createWindow(backendPort) {
   });
 }
 
-app.whenReady().then(() => {
-  createSplash();
-  // First, find a free port for FastAPI backend
+const { dialog, ipcMain } = require('electron');
+
+let selectedWorkspaceDir = null;
+
+ipcMain.handle('dialog:openDirectory', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  return null;
+});
+
+ipcMain.on('workspace:selected', (event, dirPath) => {
+  log(`Workspace selected: ${dirPath}`);
+  selectedWorkspaceDir = dirPath;
+  
   getFreePort(8000, (freeBackendPort) => {
     const backendPort = freeBackendPort;
-    
-    // Start FastAPI Python backend on dynamic port
-    startBackend(backendPort);
+    startBackend(backendPort, selectedWorkspaceDir);
 
-    // Wait 15 seconds max for Python backend
     checkBackend(backendPort, 15000, (backErr) => {
       if (backErr) {
         log(`Backend startup check failed on port ${backendPort}: ${backErr.message}`);
@@ -222,6 +237,34 @@ app.whenReady().then(() => {
       createWindow(backendPort);
     });
   });
+});
+
+ipcMain.handle('window:minimize', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize();
+});
+
+ipcMain.handle('window:maximize', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  }
+});
+
+ipcMain.handle('window:close', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+});
+
+ipcMain.handle('window:getPlatform', () => process.platform);
+
+ipcMain.handle('window:isMaximized', () => {
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow.isMaximized() : false;
+});
+
+app.whenReady().then(() => {
+  createSplash();
 });
 
 app.on('window-all-closed', () => {

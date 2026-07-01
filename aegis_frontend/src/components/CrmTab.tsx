@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { ConflictChecker } from "./ConflictChecker";
 import { ClientCard } from "./ClientCard";
+import { VirtualizedList } from "./VirtualizedList";
 
 import { useAppStore } from "../store/useAppStore";
 
@@ -187,14 +188,20 @@ export function CrmTab({
         {/* Directory list */}
         <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4 lg:col-span-2">
           <h3 className="text-sm font-bold text-zinc-200">Registered Directory Listings</h3>
-          <div className="space-y-3">
-            {clients.map(c => (
-              <ClientCard key={c.id} client={c} onDelete={handleDeleteClient} />
-            ))}
-            {clients.length === 0 && (
-              <div className="text-xs text-zinc-500 italic p-4 text-center">No client directories registered yet.</div>
-            )}
-          </div>
+          {clients.length === 0 ? (
+            <div className="text-xs text-zinc-500 italic p-4 text-center">No client directories registered yet.</div>
+          ) : (
+            <VirtualizedList
+              items={clients}
+              itemHeight={120}
+              height={Math.min(clients.length * 120, 480)}
+              renderItem={(c) => (
+                <div className="pb-3">
+                  <ClientCard client={c} onDelete={handleDeleteClient} />
+                </div>
+              )}
+            />
+          )}
         </div>
 
       </div>

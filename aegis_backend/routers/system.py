@@ -12,6 +12,7 @@ from aegis_backend.database import get_db, User, Document, Matter, Client, Audit
 from aegis_backend.core import security
 from aegis_backend.core.security import get_current_user, verify_admin
 from aegis_backend.ollama_service import OllamaService
+from aegis_backend.core.memory_guard import MemoryGuard
 
 router = APIRouter(tags=["system"])
 
@@ -149,7 +150,18 @@ async def system_diagnostics(db: AsyncSession = Depends(get_db), current_user: U
         "database_size_bytes": db_size,
         "registered_clients": client_count,
         "registered_matters": matter_count,
-        "vault_document_count": doc_count
+        "vault_document_count": doc_count,
+        "memory": MemoryGuard.get_memory_stats(),
+    }
+
+@router.get("/system/memory-status")
+def get_memory_status(current_user: User = Depends(get_current_user)):
+    stats = MemoryGuard.get_memory_stats()
+    allowed, reason = MemoryGuard.check_inference_allowed()
+    return {
+        **stats,
+        "inference_allowed": allowed,
+        "inference_message": reason if not allowed else "System resources sufficient for local AI inference.",
     }
 
 @router.get("/system/upcoming-hearings")

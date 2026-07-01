@@ -10,7 +10,8 @@ import base64
 
 # Base configuration directory in user home to prevent file permission issues
 USER_HOME = os.path.expanduser("~")
-AEGIS_DIR = os.path.join(USER_HOME, ".aegis_ai")
+AEGIS_DIR = os.environ.get("AEGIS_WORKSPACE_DIR", os.path.join(USER_HOME, ".aegis_ai"))
+
 os.makedirs(AEGIS_DIR, exist_ok=True)
 os.makedirs(os.path.join(AEGIS_DIR, "vault"), exist_ok=True)
 os.makedirs(os.path.join(AEGIS_DIR, "backups"), exist_ok=True)

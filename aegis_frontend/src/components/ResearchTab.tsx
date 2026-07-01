@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { Search, RefreshCw, Info, TrendingUp } from "lucide-react";
 import { StatutoryHelper } from "./StatutoryHelper";
+import { CitationLinker } from "./CitationLinker";
 import { RagAssistant } from "./RagAssistant";
 
 const LANDMARK_PRECEDENTS = [
@@ -276,15 +277,22 @@ export function ResearchTab({
         </div>
 
         {/* Right statutory conversion sidebar */}
-        <StatutoryHelper
-          helperAct={helperAct}
-          setHelperAct={setHelperAct}
-          helperSection={helperSection}
-          setHelperSection={setHelperSection}
-          helperResult={helperResult}
-          isSearchingHelper={isSearchingHelper}
-          handleSearchHelper={handleConvertSection}
-        />
+        <div className="space-y-4">
+          <CitationLinker
+            API_BASE={API_BASE}
+            fetchWithAuth={fetchWithAuth}
+            showNotification={showNotification}
+          />
+          <StatutoryHelper
+            helperAct={helperAct}
+            setHelperAct={setHelperAct}
+            helperSection={helperSection}
+            setHelperSection={setHelperSection}
+            helperResult={helperResult}
+            isSearchingHelper={isSearchingHelper}
+            handleSearchHelper={handleConvertSection}
+          />
+        </div>
 
       </div>
     </div>

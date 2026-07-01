@@ -2,7 +2,14 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const VALID_CHANNELS = [
   'get-system-info',
-  'check-backend-port'
+  'check-backend-port',
+  'dialog:openDirectory',
+  'workspace:selected',
+  'window:minimize',
+  'window:maximize',
+  'window:close',
+  'window:getPlatform',
+  'window:isMaximized'
 ];
 
 contextBridge.exposeInMainWorld('aegisElectron', {

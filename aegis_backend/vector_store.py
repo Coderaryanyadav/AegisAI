@@ -4,8 +4,8 @@ import collections
 from typing import List, Dict, Any, Optional
 import chromadb
 
-USER_HOME = os.path.expanduser("~")
-AEGIS_DIR = os.path.join(USER_HOME, ".aegis_ai")
+from aegis_backend.database import AEGIS_DIR
+
 CHROMA_DIR = os.path.join(AEGIS_DIR, "chroma")
 os.makedirs(CHROMA_DIR, exist_ok=True)
 
@@ -325,12 +325,62 @@ class LocalVectorStore:
         sorted_ids = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
         
         fused_output = []
-        for doc_id, rrf_score in sorted_ids[:limit]:
+        for doc_id, rrf_score in sorted_ids[:limit * 3]:
             item = active_candidates[doc_id].copy()
             item["rrf_score"] = rrf_score
             fused_output.append(item)
 
-        return fused_output
+        return self._rerank_with_cross_encoder(query, fused_output, limit)
+
+    def _rerank_with_cross_encoder(
+        self, query: str, candidates: List[Dict[str, Any]], limit: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Reranks hybrid RRF candidates using local ONNX embedding similarity
+        combined with lexical overlap for improved statutory query precision.
+        """
+        if not candidates:
+            return []
+
+        query_lower = query.lower()
+        query_terms = set(query_lower.split())
+
+        try:
+            query_emb = self.embedding_function([query])[0]
+            query_norm = math.sqrt(sum(x * x for x in query_emb)) or 1.0
+        except Exception:
+            query_emb = None
+            query_norm = 1.0
+
+        scored = []
+        for item in candidates:
+            content = item.get("content", "")
+            content_lower = content.lower()
+            doc_terms = set(content_lower.split())
+            overlap = len(query_terms & doc_terms) / max(len(query_terms), 1)
+
+            semantic_score = 0.0
+            if query_emb is not None:
+                try:
+                    snippet = content[:512]
+                    doc_emb = self.embedding_function([snippet])[0]
+                    doc_norm = math.sqrt(sum(x * x for x in doc_emb)) or 1.0
+                    dot = sum(a * b for a, b in zip(query_emb, doc_emb))
+                    semantic_score = dot / (query_norm * doc_norm)
+                except Exception:
+                    semantic_score = 0.0
+
+            rrf_score = item.get("rrf_score", 0.0)
+            final_score = (0.45 * rrf_score) + (0.35 * semantic_score) + (0.20 * overlap)
+            scored.append((final_score, item))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        output = []
+        for final_score, item in scored[:limit]:
+            result = item.copy()
+            result["rerank_score"] = final_score
+            output.append(result)
+        return output
 
     def reset_collection(self):
         """Cleans and re-creates active collection handles after disk wipes."""

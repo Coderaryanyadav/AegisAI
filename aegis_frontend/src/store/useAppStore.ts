@@ -30,6 +30,15 @@ interface AppState {
   notification: NotificationType | null;
   showNotification: (message: string, type?: "info" | "success" | "error" | "warning") => void;
   clearNotification: () => void;
+
+  isOnlineMode: boolean;
+  setIsOnlineMode: (online: boolean) => void;
+
+  lang: "en" | "hi";
+  setLang: (lang: "en" | "hi") => void;
+
+  selectedModel: string;
+  setSelectedModel: (model: string) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -58,4 +67,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }, 5000);
   },
+
+  isOnlineMode: false,
+  setIsOnlineMode: (online) => set({ isOnlineMode: online }),
+
+  lang: (typeof window !== "undefined" ? (localStorage.getItem("aegis_lang") as "en" | "hi") : "en") || "en",
+  setLang: (lang) => {
+    if (typeof window !== "undefined") localStorage.setItem("aegis_lang", lang);
+    set({ lang });
+  },
+
+  selectedModel: "deepseek-r1:8b",
+  setSelectedModel: (model) => set({ selectedModel: model }),
 }));

@@ -87,28 +87,24 @@ class DocumentProcessor:
             logger.warning("OCR is required for this scanned document, but Tesseract is not installed. Falling back to empty text.")
             return ""
 
-        ocr_text_content = ["" for _ in range(len(doc))]
-        import concurrent.futures
+        ocr_text_content = []
         
-        def process_page(page_idx):
+        # Process pages sequentially or in small fixed batches to prevent memory and CPU exhaustion.
+        # This streams the OCR pipeline page by page.
+        for page_idx in range(len(doc)):
             logger.info(f"Running OCR on page {page_idx + 1}/{len(doc)}...")
-            page = doc[page_idx]
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-            image_data = pix.tobytes("png")
-            image = Image.open(io.BytesIO(image_data))
-            return pytesseract.image_to_string(image)
-            
-        # Restrict concurrency to avoid CPU starvation on multi-page OCR processes
-        max_workers = max(1, min(4, (os.cpu_count() or 2) // 2))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(process_page, i): i for i in range(len(doc))}
-            for future in concurrent.futures.as_completed(futures):
-                page_idx = futures[future]
-                try:
-                    ocr_text_content[page_idx] = future.result()
-                except Exception as e:
-                    logger.error(f"OCR failed for page {page_idx + 1}: {e}")
-                    raise
+            try:
+                page = doc[page_idx]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                image_data = pix.tobytes("png")
+                image = Image.open(io.BytesIO(image_data))
+                text = pytesseract.image_to_string(image)
+                ocr_text_content.append(text)
+                # Note: Progress tracking could be hooked in here (e.g. updating a DB column)
+            except Exception as e:
+                logger.error(f"OCR failed for page {page_idx + 1}: {e}")
+                # We append empty string so we don't crash the entire document processing
+                ocr_text_content.append("")
 
         full_ocr_text = "\n".join(ocr_text_content).strip()
         logger.info("Successfully extracted text using OCR.")

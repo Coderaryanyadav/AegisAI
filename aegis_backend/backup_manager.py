@@ -2,7 +2,8 @@ import os
 import zipfile
 import shutil
 import base64
-import time
+import hmac
+import hashlib
 import asyncio
 import logging
 import sqlite3
@@ -16,18 +17,21 @@ from aegis_backend.database import (
 
 logger = logging.getLogger("aegis_ai.backup_manager")
 
+BACKUP_MAGIC = b"AEGISBK2"
+HMAC_SIZE = 32
+
 class BackupManager:
     """Manages 100% offline, AES-256 GCM encrypted backups and restore points."""
 
     @staticmethod
     def get_aes_key() -> bytes:
         """Loads and returns raw 32-byte key for AES-256 GCM."""
-        if not os.path.exists(KEY_PATH):
-            raise FileNotFoundError(f"Master key file not found: {KEY_PATH}")
-        with open(KEY_PATH, "rb") as f:
-            fernet_key = f.read()
+        from aegis_backend.database import get_secure_key, KEY_PATH
+        key_data = get_secure_key("aegis_master_key", KEY_PATH, is_hex=False)
+        if isinstance(key_data, str):
+            key_data = key_data.encode("utf-8")
         # Decode url-safe base64 key to get raw 32 bytes
-        return base64.urlsafe_b64decode(fernet_key)
+        return base64.urlsafe_b64decode(key_data)
 
     @classmethod
     def encrypt_data(cls, data: bytes) -> bytes:
@@ -39,6 +43,33 @@ class BackupManager:
         ciphertext = encryptor.update(data) + encryptor.finalize()
         # Pack nonce + tag + ciphertext
         return nonce + encryptor.tag + ciphertext
+
+    @classmethod
+    def _compute_hmac(cls, data: bytes) -> bytes:
+        key = cls.get_aes_key()
+        return hmac.new(key, data, hashlib.sha256).digest()
+
+    @classmethod
+    def _pack_signed_backup(cls, encrypted_data: bytes) -> bytes:
+        signature = cls._compute_hmac(encrypted_data)
+        return BACKUP_MAGIC + signature + encrypted_data
+
+    @classmethod
+    def _unpack_signed_backup(cls, signed_data: bytes) -> bytes:
+        if signed_data.startswith(BACKUP_MAGIC):
+            header_len = len(BACKUP_MAGIC) + HMAC_SIZE
+            if len(signed_data) < header_len:
+                raise ValueError("Signed backup file is corrupt or truncated.")
+            signature = signed_data[len(BACKUP_MAGIC):header_len]
+            encrypted_data = signed_data[header_len:]
+            expected = cls._compute_hmac(encrypted_data)
+            if not hmac.compare_digest(signature, expected):
+                raise ValueError(
+                    "Backup integrity check failed: file has been tampered with or is corrupt."
+                )
+            return encrypted_data
+        logger.warning("Restoring legacy backup without HMAC signature header.")
+        return signed_data
 
     @classmethod
     def decrypt_data(cls, encrypted_data: bytes) -> bytes:
@@ -144,11 +175,12 @@ class BackupManager:
                     zip_data = f.read()
 
                 encrypted_data = cls.encrypt_data(zip_data)
-                
-                with open(backup_path, "wb") as f:
-                    f.write(encrypted_data)
+                signed_backup = cls._pack_signed_backup(encrypted_data)
 
-                size_bytes = len(encrypted_data)
+                with open(backup_path, "wb") as f:
+                    f.write(signed_backup)
+
+                size_bytes = len(signed_backup)
                 logger.info(f"Backup created successfully: {backup_path} ({size_bytes} bytes)")
 
                 # Record history
@@ -202,9 +234,9 @@ class BackupManager:
 
         try:
             with open(backup_path, "rb") as f:
-                encrypted_data = f.read()
+                signed_data = f.read()
 
-            # Decrypt backup zip file
+            encrypted_data = cls._unpack_signed_backup(signed_data)
             zip_data = cls.decrypt_data(encrypted_data)
 
             is_sqlite = DATABASE_URL.startswith("sqlite")

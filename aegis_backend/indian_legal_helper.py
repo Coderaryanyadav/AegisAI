@@ -1,13 +1,38 @@
 import re
 import os
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 # Standard citation normalization regexes
 SC_CITATION_PATTERNS = [
     r"(?P<year>\d{4})\s*\((?P<reporter>SCC|SCR|SCC\s*\(Cri\))\)\s*(?P<volume>\d+)\s*(?P<page>\d+)",
     r"AIR\s*(?P<year>\d{4})\s*SC\s*(?P<page>\d+)",
     r"(?P<year>\d{4})\s*INSC\s*(?P<page>\d+)"
+]
+
+ACT_ALIASES = {
+    "IPC": "IPC",
+    "INDIAN PENAL CODE": "IPC",
+    "I.P.C": "IPC",
+    "I P C": "IPC",
+    "BNS": "BNS",
+    "BHARATIYA NYAYA SANHITA": "BNS",
+    "CRPC": "CRPC",
+    "CR.P.C": "CRPC",
+    "CODE OF CRIMINAL PROCEDURE": "CRPC",
+    "BNSS": "BNSS",
+    "BHARATIYA NAGARIK SURAKSHA SANHITA": "BNSS",
+    "IEA": "IEA",
+    "INDIAN EVIDENCE ACT": "IEA",
+    "EVIDENCE ACT": "IEA",
+    "BSA": "BSA",
+    "BHARATIYA SAKSHYA ADHINIYAM": "BSA",
+}
+
+STATUTORY_CITATION_PATTERNS = [
+    r"(?P<act>IPC|Indian Penal Code|I\.?\s*P\.?\s*C\.?|BNS|Bharatiya Nyaya Sanhita|CrPC|Cr\.?\s*P\.?\s*C\.?|Code of Criminal Procedure|BNSS|Bharatiya Nagarik Suraksha Sanhita|IEA|Indian Evidence Act|Evidence Act|BSA|Bharatiya Sakshya Adhiniyam)[^\n]{0,40}?(?:Section|Sec\.?|S\.?)\s*(?P<section>\d+[A-Za-z]?(?:\(\d+\))?)",
+    r"(?:Section|Sec\.?|S\.?)\s*(?P<section2>\d+[A-Za-z]?(?:\(\d+\))?)\s*(?:of\s*(?:the\s*)?)?(?P<act2>IPC|Indian Penal Code|I\.?\s*P\.?\s*C\.?|BNS|CrPC|Cr\.?\s*P\.?\s*C\.?|BNSS|IEA|Indian Evidence Act|Evidence Act|BSA)",
+    r"(?P<act3>IPC|BNS|CrPC|BNSS|IEA|BSA)\s*(?:Section|Sec\.?|S\.?)\s*(?P<section3>\d+[A-Za-z]?(?:\(\d+\))?)",
 ]
 
 class IndianLegalHelper:
@@ -226,3 +251,66 @@ class IndianLegalHelper:
         # General fallback normalization
         fallback = clean.lower().replace(" ", "-")
         return fallback
+
+    @classmethod
+    def _normalize_act_name(cls, act_raw: str) -> str:
+        cleaned = re.sub(r"[\.\s]+", " ", act_raw.strip().upper())
+        return ACT_ALIASES.get(cleaned, cleaned.split()[0] if cleaned else act_raw.upper())
+
+    @classmethod
+    def detect_statutory_citations(cls, text: str) -> List[Dict[str, Any]]:
+        """
+        Detect statutory citations in legal text (e.g. 'IPC Section 302', 'S. 154 CrPC').
+        Returns deduplicated list of citation objects with act, section, and matched text span.
+        """
+        if not text or not text.strip():
+            return []
+
+        seen = set()
+        citations: List[Dict[str, Any]] = []
+
+        for pattern in STATUTORY_CITATION_PATTERNS:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                groups = match.groupdict()
+                act_raw = groups.get("act") or groups.get("act2") or groups.get("act3") or ""
+                section = groups.get("section") or groups.get("section2") or groups.get("section3") or ""
+                if not act_raw or not section:
+                    continue
+
+                act = cls._normalize_act_name(act_raw)
+                section_clean = section.strip().upper()
+                key = (act, section_clean)
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                mapping = cls.convert_section(act.lower(), section_clean)
+                citations.append({
+                    "act": act,
+                    "section": section_clean,
+                    "matched_text": match.group(0).strip(),
+                    "start": match.start(),
+                    "end": match.end(),
+                    "mapping": mapping,
+                })
+
+        citations.sort(key=lambda c: c["start"])
+        return citations
+
+    @classmethod
+    def resolve_bare_act_lookup(cls, act: str, section: str) -> Optional[Dict[str, Any]]:
+        """Resolve a statutory reference to its mapped equivalent and lookup metadata."""
+        act_upper = cls._normalize_act_name(act)
+        section_clean = section.strip()
+
+        mapping = cls.convert_section(act.lower(), section_clean)
+        target_act = mapping["act"] if mapping else act_upper
+        target_section = mapping["new_section"] if mapping else section_clean
+
+        return {
+            "requested_act": act_upper,
+            "requested_section": section_clean,
+            "target_act": target_act,
+            "target_section": target_section,
+            "mapping": mapping,
+        }

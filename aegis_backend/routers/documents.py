@@ -56,22 +56,20 @@ async def upload_document(
     if file_size > 100 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File size exceeds the maximum limit of 100MB.")
 
-    # Read file asynchronously to avoid blocking the event loop
-    raw_data = await file.read()
-        
+    # Stream file to a temporary location to prevent memory spikes
+    import tempfile
+    fd, tmp_path = tempfile.mkstemp(suffix=ext)
     sha256_hash = hashlib.sha256()
-    sha256_hash.update(raw_data)
-    file_hash = sha256_hash.hexdigest()
-
-    from aegis_backend.database import cipher
     
-    def encrypt_and_save(data: bytes, path: str):
-        encrypted = cipher.encrypt(data)
-        with open(path, "wb") as buffer:
-            buffer.write(encrypted)
+    with os.fdopen(fd, "wb") as f:
+        while True:
+            chunk = await file.read(64 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
+            sha256_hash.update(chunk)
             
-    import asyncio
-    await asyncio.to_thread(encrypt_and_save, raw_data, dest_path)
+    file_hash = sha256_hash.hexdigest()
 
     # Register in SQLite via DocumentService
     doc = await DocumentService.create_document_record(
@@ -86,7 +84,7 @@ async def upload_document(
     await log_audit_trail(db, current_user.email, "UPLOAD_DOC", "documents", str(doc.id), safe_filename)
 
     # Trigger background extractor and indexer
-    background_tasks.add_task(DocumentService.process_uploaded_document_task, doc.id, dest_path)
+    background_tasks.add_task(DocumentService.process_uploaded_document_task, doc.id, dest_path, tmp_path)
 
     # Invalidate RAG Cache
     rag_cache.clear()
