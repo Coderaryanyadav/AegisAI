@@ -1,1 +1,0 @@
-(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,52683,e=>{"use strict";var t=e.i(71645),u=e.i(18566),o=e.i(25745);e.s(["default",0,function(){let e=(0,u.useRouter)(),r=(0,o.useAppStore)(e=>e.token);return(0,t.useEffect)(()=>{r&&e.replace("/dashboard")},[r,e]),null}])}]);

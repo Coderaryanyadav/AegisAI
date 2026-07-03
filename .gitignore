@@ -29,7 +29,9 @@ dist/
 
 # Electron & Next.js desktop packaging exclusions
 aegis_desktop/node_modules/
+aegis_desktop/out/
 dist_desktop/
 *.log
 *.txt
+
 

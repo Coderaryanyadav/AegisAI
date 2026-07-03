@@ -50,7 +50,7 @@ function checkBackend(port, timeoutMs, callback) {
       callback(new Error('Backend timeout'));
       return;
     }
-    
+
     const req = http.request({
       host: '127.0.0.1',
       port: port,
@@ -76,7 +76,7 @@ function checkBackend(port, timeoutMs, callback) {
 
 function startBackend(port, workspaceDir) {
   log(`Starting FastAPI backend process on port ${port} for workspace ${workspaceDir}...`);
-  
+
   let pythonExecutable = 'python3';
   let pythonArgs = [];
   let cwd = path.join(__dirname, '..');
@@ -109,9 +109,9 @@ function startBackend(port, workspaceDir) {
   try {
     backendProcess = spawn(pythonExecutable, pythonArgs, {
       cwd: cwd,
-      env: { 
-        ...process.env, 
-        PORT: port.toString(), 
+      env: {
+        ...process.env,
+        PORT: port.toString(),
         PYTHONUNBUFFERED: '1',
         AEGIS_CORS_ORIGINS: `http://localhost:${staticServerPort},http://127.0.0.1:${staticServerPort}`,
         AEGIS_WORKSPACE_DIR: workspaceDir
@@ -180,7 +180,7 @@ function createWindow(backendPort) {
   mainWindow.setBackgroundColor('#09090b');
 
   const isDev = !app.isPackaged && process.env.NODE_ENV !== 'production';
-  
+
   if (isDev) {
     log(`Loading local dev server: http://localhost:3000?backend_port=${backendPort}`);
     mainWindow.loadURL(`http://localhost:3000?backend_port=${backendPort}`);
@@ -225,7 +225,7 @@ ipcMain.handle('dialog:openDirectory', async () => {
 ipcMain.on('workspace:selected', (event, dirPath) => {
   log(`Workspace selected: ${dirPath}`);
   selectedWorkspaceDir = dirPath;
-  
+
   getFreePort(8000, (freeBackendPort) => {
     const backendPort = freeBackendPort;
     startBackend(backendPort, selectedWorkspaceDir);
