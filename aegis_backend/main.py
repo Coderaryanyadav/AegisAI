@@ -108,17 +108,32 @@ async def ensure_ollama_runtime():
     else:
         logger.warning("Could not establish connection to Ollama. Automatic model pre-pull skipped.")
 
+async def monitor_ollama_runtime():
+    """Watchdog loop to ensure background Ollama remains running during execution."""
+    global ollama_process
+    while True:
+        await asyncio.sleep(10.0)
+        # Only supervise if we programmatically started it
+        if ollama_process is not None:
+            if ollama_process.poll() is not None:
+                logger.warning("Programmatically spawned Ollama process terminated unexpectedly. Restarting...")
+                ollama_process = None
+                await ensure_ollama_runtime()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Schedule automated snapshot every hour
     backup_task = asyncio.create_task(run_backup_scheduler(interval_seconds=3600, retention_limit=5))
     # Spin up background Ollama checks and auto-launcher
     ollama_task = asyncio.create_task(ensure_ollama_runtime())
+    # Spin up subprocess watchdog monitor
+    watchdog_task = asyncio.create_task(monitor_ollama_runtime())
     yield
     # Clean up background tasks on shutdown
     logger.info("AegisAI backend shutting down. Cleaning up background tasks...")
     backup_task.cancel()
     ollama_task.cancel()
+    watchdog_task.cancel()
     
     # Close HTTP connection pool
     try:
@@ -129,7 +144,7 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Error closing HTTP client pool: {e}")
 
     try:
-        await asyncio.gather(backup_task, ollama_task, return_exceptions=True)
+        await asyncio.gather(backup_task, ollama_task, watchdog_task, return_exceptions=True)
     except Exception as e:
         logger.warning(f"Error during lifespan shutdown cleanup: {e}")
 
