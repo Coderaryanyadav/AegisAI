@@ -35,6 +35,11 @@ export function SettingsTab({
   const [firmLogo, setFirmLogo] = useState(currentUser?.firm_logo || "");
   const [gstRate, setGstRate] = useState(currentUser?.gst_rate !== undefined ? currentUser.gst_rate : 18.0);
 
+  // License states
+  const [licenseKey, setLicenseKey] = useState("");
+  const [licenseStatus, setLicenseStatus] = useState<any>(null);
+  const [licenseLoading, setLicenseLoading] = useState(false);
+
 
 
   const check2FAStatus = async () => {
@@ -44,7 +49,45 @@ export function SettingsTab({
         const d = await res.json();
         setTwoFaEnabled(d.enabled);
       }
-    } catch { }
+    } catch (err: any) {
+      console.error("Failed to check 2FA status:", err);
+    }
+  };
+
+  const checkLicenseStatus = async () => {
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/system/license/status`);
+      if (res.ok) {
+        const d = await res.json();
+        setLicenseStatus(d);
+      }
+    } catch (err: any) {
+      console.error("Failed to check license status:", err);
+    }
+  };
+
+  const handleActivateLicense = async () => {
+    if (!licenseKey) return;
+    setLicenseLoading(true);
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/system/license/activate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ license_key: licenseKey })
+      });
+      const d = await res.json();
+      if (res.ok) {
+        showNotification("License activated successfully!", "success");
+        setLicenseStatus({ active: true, payload: d.payload });
+        setLicenseKey("");
+      } else {
+        showNotification(d.detail || "Invalid license key", "error");
+      }
+    } catch (e: any) {
+      showNotification(e.message, "error");
+    } finally {
+      setLicenseLoading(false);
+    }
   };
 
   const handle2FASetup = async () => {
@@ -106,6 +149,7 @@ export function SettingsTab({
 
   useEffect(() => {
     check2FAStatus();
+    checkLicenseStatus();
   }, []);
 
   useEffect(() => {
@@ -244,6 +288,40 @@ export function SettingsTab({
               Save Configuration
             </button>
           </div>
+        </div>
+
+        <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-zinc-200">Enterprise Activation</h3>
+            <span className={`text-[10px] px-2 py-0.5 rounded border font-bold ${licenseStatus?.active ? "text-emerald-400 border-emerald-800 bg-emerald-950/30" : "text-amber-500 border-amber-800 bg-amber-950/30"}`}>
+              {licenseStatus?.active ? "ACTIVATED" : "UNLICENSED"}
+            </span>
+          </div>
+          <p className="text-xs text-zinc-400">Apply your offline cryptographic license key.</p>
+          
+          {licenseStatus?.active ? (
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between p-2 bg-zinc-950/60 rounded-lg"><span className="text-zinc-500">Licensee</span><span className="text-zinc-202">{licenseStatus.payload?.licensee}</span></div>
+              <div className="flex justify-between p-2 bg-zinc-950/60 rounded-lg"><span className="text-zinc-505">Tier</span><span className="text-violet-400 font-bold">{licenseStatus.payload?.tier}</span></div>
+              <div className="flex justify-between p-2 bg-zinc-950/60 rounded-lg"><span className="text-zinc-505">Expires At</span><span className="text-zinc-202">{new Date(licenseStatus.payload?.expires_at).toLocaleDateString()}</span></div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <textarea
+                value={licenseKey}
+                onChange={e => setLicenseKey(e.target.value)}
+                placeholder="Paste your base64 license key here..."
+                className="w-full p-2.5 h-24 rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805 text-xs font-mono"
+              />
+              <button
+                onClick={handleActivateLicense}
+                disabled={!licenseKey || licenseLoading}
+                className="w-full py-2 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-lg transition text-xs cursor-pointer disabled:opacity-50"
+              >
+                {licenseLoading ? "Verifying..." : "Activate License"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

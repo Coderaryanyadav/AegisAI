@@ -245,6 +245,8 @@ for r in [
     app.include_router(r, prefix="/api/v1")
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
     args, unknown = parser.parse_known_args()

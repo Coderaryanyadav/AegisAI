@@ -66,7 +66,7 @@ export function BillingTab({
     try {
       const res = await fetchWithAuth(`${API_BASE}/api/v1/billing/time-entries?matter_id=${matterId}`);
       if (res.ok) setTimeEntries(await res.json());
-    } catch {}
+    } catch { }
   };
 
   const handleAddTimeEntry = async () => {
@@ -82,8 +82,8 @@ export function BillingTab({
         fetchTimeEntries(billingMatterId);
         setNewTimeEntry({ description: "", hours: "1", rate_per_hour: "5000", date: new Date().toISOString().split("T")[0] });
       }
-    } catch (e: any) { 
-      showNotification(e.message, "error"); 
+    } catch (e: any) {
+      showNotification(e.message, "error");
     }
   };
 
@@ -119,10 +119,10 @@ export function BillingTab({
           currentUser?.firm_logo
         );
       }
-    } catch (e: any) { 
-      showNotification(e.message, "error"); 
-    } finally { 
-      setIsCreatingInvoice(false); 
+    } catch (e: any) {
+      showNotification(e.message, "error");
+    } finally {
+      setIsCreatingInvoice(false);
     }
   };
 
@@ -131,7 +131,7 @@ export function BillingTab({
       const url = selectedClient ? `${API_BASE}/api/v1/billing/invoices?client_id=${selectedClient.id}` : `${API_BASE}/api/v1/billing/invoices`;
       const res = await fetchWithAuth(url);
       if (res.ok) setInvoices(await res.json());
-    } catch {}
+    } catch { }
   };
 
   const startTimer = () => {
@@ -172,11 +172,11 @@ export function BillingTab({
       </div>
       {selectedClient && (
         <div className="flex gap-4 items-center flex-wrap">
-          <select 
-            onChange={(e) => { 
-              const id = parseInt(e.target.value); 
-              setBillingMatterId(id || null); 
-              if (id) fetchTimeEntries(id); 
+          <select
+            onChange={(e) => {
+              const id = parseInt(e.target.value);
+              setBillingMatterId(id || null);
+              if (id) fetchTimeEntries(id);
             }}
             className="p-2 text-xs rounded-lg glass-input text-zinc-300 bg-zinc-950 border border-zinc-805"
           >
@@ -187,7 +187,7 @@ export function BillingTab({
         </div>
       )}
       {!selectedClient && <div className="p-4 border border-zinc-800 rounded-xl text-xs text-zinc-500">Select a client from Matters & Context tab first.</div>}
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {currentUser?.role !== "client" && (
           <div className="border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4">
@@ -202,37 +202,37 @@ export function BillingTab({
               </div>
             </div>
             <div className="space-y-2">
-              <input 
-                value={newTimeEntry.description} 
-                onChange={e => setNewTimeEntry(p => ({...p, description: e.target.value}))}
-                placeholder="Work description (e.g. Court appearance)" 
-                className="w-full p-2.5 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805" 
+              <input
+                value={newTimeEntry.description}
+                onChange={e => setNewTimeEntry(p => ({ ...p, description: e.target.value }))}
+                placeholder="Work description (e.g. Court appearance)"
+                className="w-full p-2.5 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805"
               />
               <div className="grid grid-cols-3 gap-2">
-                <input 
-                  value={newTimeEntry.hours} 
-                  onChange={e => setNewTimeEntry(p => ({...p, hours: e.target.value}))}
-                  type="number" 
-                  step="0.5" 
-                  placeholder="Hours" 
-                  className="p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805" 
+                <input
+                  value={newTimeEntry.hours}
+                  onChange={e => setNewTimeEntry(p => ({ ...p, hours: e.target.value }))}
+                  type="number"
+                  step="0.5"
+                  placeholder="Hours"
+                  className="p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805"
                 />
-                <input 
-                  value={newTimeEntry.rate_per_hour} 
-                  onChange={e => setNewTimeEntry(p => ({...p, rate_per_hour: e.target.value}))}
-                  type="number" 
-                  placeholder="₹ Rate/hr" 
-                  className="p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805" 
+                <input
+                  value={newTimeEntry.rate_per_hour}
+                  onChange={e => setNewTimeEntry(p => ({ ...p, rate_per_hour: e.target.value }))}
+                  type="number"
+                  placeholder="₹ Rate/hr"
+                  className="p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805"
                 />
-                <input 
-                  value={newTimeEntry.date} 
-                  onChange={e => setNewTimeEntry(p => ({...p, date: e.target.value}))}
-                  type="date" 
-                  className="p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805" 
+                <input
+                  value={newTimeEntry.date}
+                  onChange={e => setNewTimeEntry(p => ({ ...p, date: e.target.value }))}
+                  type="date"
+                  className="p-2 text-xs rounded-lg glass-input text-zinc-200 bg-zinc-950 border border-zinc-805"
                 />
               </div>
-              <button 
-                onClick={handleAddTimeEntry} 
+              <button
+                onClick={handleAddTimeEntry}
                 disabled={!billingMatterId}
                 className="w-full py-2 bg-zinc-50 hover:bg-zinc-200 text-zinc-950 font-semibold rounded-lg text-xs transition disabled:opacity-50 cursor-pointer"
               >
@@ -262,7 +262,7 @@ export function BillingTab({
             </div>
           </div>
         )}
-        
+
         <div className={`border border-zinc-800 bg-zinc-900/30 p-6 rounded-xl space-y-4 ${currentUser?.role === "client" ? "lg:col-span-2" : ""}`}>
           {currentUser?.role !== "client" ? (
             <>
@@ -272,8 +272,8 @@ export function BillingTab({
                 <div className="flex justify-between"><span className="text-zinc-400">GST @ 18%</span><span className="text-amber-400">₹{(totalBillableAmount * 0.18).toFixed(2)}</span></div>
                 <div className="flex justify-between border-t border-zinc-700 pt-2 font-bold"><span>Grand Total</span><span className="text-emerald-400">₹{(totalBillableAmount * 1.18).toFixed(2)}</span></div>
               </div>
-              <button 
-                onClick={handleGenerateInvoice} 
+              <button
+                onClick={handleGenerateInvoice}
                 disabled={isCreatingInvoice || !billingMatterId}
                 className="w-full py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition disabled:opacity-50 cursor-pointer animate-pulse-glow"
               >
@@ -286,7 +286,7 @@ export function BillingTab({
               <span className="text-[10px] text-zinc-500 font-mono">GST 18% INCLUDED</span>
             </div>
           )}
-          
+
           <div className="space-y-2 max-h-[400px] overflow-y-auto pt-1">
             <h4 className="text-[10px] text-zinc-505 font-bold uppercase">All Invoices</h4>
             {invoices.map((inv) => (
@@ -298,7 +298,7 @@ export function BillingTab({
                 <div className="flex items-center gap-2">
                   <span className="text-emerald-400 font-semibold">₹{inv.grand_total}</span>
                   <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${inv.status === "paid" ? "bg-emerald-900/40 text-emerald-400 border border-emerald-800" : "bg-amber-900/40 text-amber-400 border border-amber-800"}`}>{inv.status.toUpperCase()}</span>
-                  <button 
+                  <button
                     onClick={() => {
                       exportToPDF(
                         inv.invoice_number,

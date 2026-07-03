@@ -2,11 +2,20 @@ import os
 import asyncio
 import logging
 from typing import List
+from concurrent.futures import ProcessPoolExecutor
+
 from aegis_backend.database import AsyncSessionLocal, Document
 from aegis_backend.vector_store import vector_store
 from aegis_backend.document_processor import DocumentProcessor
 
 logger = logging.getLogger("aegis_ai.backend")
+
+# Global ProcessPoolExecutor for CPU-bound OCR and PDF processing
+_process_executor = None
+
+def _process_document_process_worker(dest_path: str, original_name: str, tmp_path: str = None) -> str:
+    """Helper module-level function for pickling inside ProcessPoolExecutor."""
+    return DocumentService.process_document_sync(dest_path, original_name, tmp_path)
 
 class DocumentService:
     @staticmethod
@@ -81,8 +90,13 @@ class DocumentService:
             await db.commit()
 
             try:
-                # Offload heavy encryption & extraction to thread pool to avoid blocking event loop
-                text = await asyncio.to_thread(DocumentService.process_document_sync, file_path, doc.original_name, tmp_path)
+                # Offload heavy encryption & extraction to ProcessPoolExecutor to bypass the GIL
+                global _process_executor
+                if _process_executor is None:
+                    _process_executor = ProcessPoolExecutor(max_workers=2)
+                
+                loop = asyncio.get_running_loop()
+                text = await loop.run_in_executor(_process_executor, _process_document_process_worker, file_path, doc.original_name, tmp_path)
                 
                 # Chunk text
                 chunks = DocumentService.chunk_text(text, document_name=doc.original_name)

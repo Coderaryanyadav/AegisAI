@@ -183,3 +183,37 @@ async def get_upcoming_hearings(hours: int = 48, db: AsyncSession = Depends(get_
         for s in schedules
     ]
 
+@router.post("/system/license/activate")
+async def activate_license(req: Dict[str, str], current_user: User = Depends(verify_admin)):
+    from aegis_backend.core.licensing import LicenseValidator
+    license_key = req.get("license_key")
+    if not license_key:
+        raise HTTPException(status_code=400, detail="license_key is required")
+        
+    try:
+        payload = LicenseValidator.verify_license(license_key)
+        
+        # Save license key securely
+        license_path = os.path.join(AEGIS_DIR, ".license.key")
+        with open(license_path, "w") as f:
+            f.write(license_key.strip())
+            
+        return {"status": "success", "message": "License activated successfully.", "payload": payload}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/system/license/status")
+async def get_license_status(current_user: User = Depends(get_current_user)):
+    from aegis_backend.core.licensing import LicenseValidator
+    license_path = os.path.join(AEGIS_DIR, ".license.key")
+    if not os.path.exists(license_path):
+        return {"active": False, "reason": "No license key found"}
+        
+    try:
+        with open(license_path, "r") as f:
+            license_key = f.read().strip()
+            
+        payload = LicenseValidator.verify_license(license_key)
+        return {"active": True, "payload": payload}
+    except ValueError as e:
+        return {"active": False, "reason": str(e)}

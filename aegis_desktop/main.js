@@ -4,8 +4,6 @@ const { spawn } = require('child_process');
 const http = require('http');
 const fs = require('fs');
 const net = require('net');
-const serve = require('electron-serve');
-const serveStatic = serve({ directory: 'out' });
 
 let mainWindow;
 let splashWindow;
@@ -189,9 +187,13 @@ function createWindow(backendPort) {
     mainWindow.webContents.openDevTools();
   } else {
     log(`Loading production static build with backend port ${backendPort}`);
-    serveStatic(mainWindow).then(() => {
-      mainWindow.loadURL(`app://-?backend_port=${backendPort}`);
-    });
+    import('electron-serve').then((module) => {
+      const serve = module.default;
+      const serveStatic = serve({ directory: 'out' });
+      serveStatic(mainWindow).then(() => {
+        mainWindow.loadURL(`app://-?backend_port=${backendPort}`);
+      });
+    }).catch(err => log(`Failed to load electron-serve: ${err}`));
   }
 
   mainWindow.once('ready-to-show', () => {

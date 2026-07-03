@@ -352,18 +352,24 @@ class LocalVectorStore:
             query_emb = None
             query_norm = 1.0
 
+        # Batch encode all document snippets in a single model call
+        snippets = [item.get("content", "")[:512] for item in candidates]
+        try:
+            doc_embs = self.embedding_function(snippets)
+        except Exception:
+            doc_embs = [None] * len(candidates)
+
         scored = []
-        for item in candidates:
+        for idx, item in enumerate(candidates):
             content = item.get("content", "")
             content_lower = content.lower()
             doc_terms = set(content_lower.split())
             overlap = len(query_terms & doc_terms) / max(len(query_terms), 1)
 
             semantic_score = 0.0
-            if query_emb is not None:
+            if query_emb is not None and doc_embs[idx] is not None:
                 try:
-                    snippet = content[:512]
-                    doc_emb = self.embedding_function([snippet])[0]
+                    doc_emb = doc_embs[idx]
                     doc_norm = math.sqrt(sum(x * x for x in doc_emb)) or 1.0
                     dot = sum(a * b for a, b in zip(query_emb, doc_emb))
                     semantic_score = dot / (query_norm * doc_norm)
