@@ -82,13 +82,29 @@ async def ensure_ollama_runtime():
         
         # Auto-register local bundled model 'aegis-default'
         if not any("aegis-default" in m for m in models):
-            logger.info("Aegis-default model is missing from Ollama. Auto-registering from offline bundle...")
+            logger.info("Aegis-default model is missing from Ollama. Checking offline bundle...")
             if hasattr(sys, '_MEIPASS'):
                 bundle_dir = os.path.join(sys._MEIPASS, "aegis_backend", "model_bundle")
             else:
                 bundle_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_bundle")
+            
+            gguf_path = os.path.join(bundle_dir, "aegis-base.gguf")
+            is_stub = False
+            if os.path.exists(gguf_path):
+                try:
+                    with open(gguf_path, "rb") as f:
+                        header = f.read(64)
+                        if b"GGUF_MOCK_MODEL_DATA" in header or not header.startswith(b"GGUF"):
+                            is_stub = True
+                except Exception:
+                    pass
+            else:
+                is_stub = True
+
             modelfile_path = os.path.join(bundle_dir, "Modelfile")
-            if os.path.exists(modelfile_path):
+            if is_stub:
+                logger.warning("Aegis-default model bundle uses a mock GGUF placeholder. Skipping auto-registration. Please pull a standard model (e.g. mistral) or replace model_bundle/aegis-base.gguf with a valid GGUF model.")
+            elif os.path.exists(modelfile_path):
                 try:
                     subprocess.Popen(["ollama", "create", "aegis-default", "-f", modelfile_path],
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

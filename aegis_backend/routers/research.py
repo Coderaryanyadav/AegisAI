@@ -57,43 +57,7 @@ async def query_legal_rag_stream(
             return
 
         chunks = vector_store.query_hybrid(req.query, limit=5, document_ids=req.matter_ids)
-        safe_chunks = [c for c in chunks if not check_prompt_injection(c["content"])]
-
-        import tiktoken
-        encoder = tiktoken.get_encoding("cl100k_base")
-        context = ""
-        total_tokens = 0
-        max_tokens = 6000
-        for idx, c in enumerate(safe_chunks):
-            filename = c["metadata"].get("filename", "Unknown Document")
-            chunk_content = c["content"]
-            chunk_tokens = len(encoder.encode(chunk_content))
-            
-            if total_tokens + chunk_tokens > max_tokens:
-                allowed_tokens = max_tokens - total_tokens
-                if allowed_tokens <= 0:
-                    break
-                encoded = encoder.encode(chunk_content)
-                chunk_content = encoder.decode(encoded[:allowed_tokens]) + " [Content truncated to fit local LLM context limits]"
-                total_tokens += allowed_tokens
-            else:
-                total_tokens += chunk_tokens
-                
-            context += f"[Context {idx+1}] File: {filename}\nContent:\n{chunk_content}\n\n"
-
-        system_prompt = (
-            "You are AegisAI, an expert Indian legal assistant. "
-            "Answer the user's questions truthfully and accurately using the context provided. "
-            "Always cite the document name or section numbers clearly. "
-            "Provide professional analysis, citations, ratios, or statutory converted references where relevant. "
-            "If you do not know, state that you do not know based on local context."
-        )
-
-        prompt = (
-            f"Context Details:\n{context}\n"
-            f"Query: {req.query}\n"
-            f"Provide your professional legal response with references:"
-        )
+        prompt, system_prompt = ResearchService.build_rag_context_and_prompts(req.query, chunks)
 
         full_response_parts = []
         async for chunk in OllamaService.generate_completion_stream(
@@ -105,9 +69,10 @@ async def query_legal_rag_stream(
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
 
         full_text = "".join(full_response_parts)
+        sources = [{"id": c["id"], "text": c["content"], "metadata": c["metadata"]} for c in chunks if not check_prompt_injection(c["content"])]
         result_data = {
             "response": full_text,
-            "sources": [{"id": c["id"], "text": c["content"], "metadata": c["metadata"]} for c in safe_chunks],
+            "sources": sources,
             "disclaimer": "AI-generated content is for informational purposes only. It is not professional legal advice and must be independently verified by an advocate."
         }
 

@@ -36,7 +36,7 @@ export function DraftingTab({
 
   const fetchDraftTemplates = async () => {
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/draft/templates`);
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/draft/templates`);
       if (response.ok) {
         const data = await response.json();
         setTemplates(data);
@@ -62,7 +62,7 @@ export function DraftingTab({
     setGeneratedDraft("");
     try {
       const response = await fetchWithAuth(
-        `${API_BASE}/api/draft/generate?template_id=${selectedTemplate.id}&model_name=${selectedModel}`, {
+        `${API_BASE}/api/v1/draft/generate?template_id=${selectedTemplate.id}&model_name=${selectedModel}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(templateFields)
@@ -84,7 +84,7 @@ export function DraftingTab({
     if (!generatedDraft) return;
     setIsFormattingDraft(true);
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/draft/format`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/draft/format`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
