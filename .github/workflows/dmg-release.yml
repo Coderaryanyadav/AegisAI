@@ -1,4 +1,4 @@
-name: Release AegisAI Desktop
+name: macOS DMG Release
 
 on:
   push:
@@ -7,12 +7,20 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version tag (e.g., v1.0.0)'
+        description: 'Release version tag (e.g. 1.0.0)'
         required: true
-        default: 'v1.0.0'
+        default: '1.0.0'
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 jobs:
-  build-macos:
+  build-dmg:
     name: Build macOS DMG (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -24,12 +32,11 @@ jobs:
           - os: macos-13
             arch: x64
 
-    permissions:
-      contents: write
-
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -43,9 +50,9 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pytest pytest-asyncio
 
-      - name: Run Backend Regression Tests
+      - name: Run Backend Unit Tests
         run: |
-          PYTHONPATH=. pytest tests/test_unit.py
+          PYTHONPATH=. pytest tests/test_unit.py -q --disable-warnings
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
@@ -60,16 +67,16 @@ jobs:
           npm ci
           npm run build
 
-      - name: Sync Static Assets to Desktop Wrapper
+      - name: Synchronize Frontend Export to Electron Desktop
         run: |
           rm -rf aegis_desktop/out
           cp -R aegis_frontend/out aegis_desktop/out
 
-      - name: Compile Backend Binary with PyInstaller
+      - name: Compile Standalone Backend Binary with PyInstaller
         run: |
           pyinstaller aegis_backend.spec --clean --noconfirm
 
-      - name: Package Desktop App and DMG (${{ matrix.arch }})
+      - name: Package macOS DMG Application
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: |
@@ -81,13 +88,14 @@ jobs:
       - name: Generate Checksums
         run: |
           cd dist_desktop
-          for file in *.dmg; do
-            if [ -f "$file" ]; then
-              shasum -a 256 "$file" > "${file}.sha256"
+          for dmg in *.dmg; do
+            if [ -f "$dmg" ]; then
+              shasum -a 256 "$dmg" > "${dmg}.sha256"
             fi
           done
+          ls -la
 
-      - name: Upload Artifacts
+      - name: Upload DMG Artifact
         uses: actions/upload-artifact@v4
         with:
           name: AegisAI-macOS-${{ matrix.arch }}
@@ -96,11 +104,9 @@ jobs:
             dist_desktop/*.sha256
 
   publish-release:
-    name: Publish GitHub Release 1.0.0
-    needs: [build-macos]
+    name: Publish Official GitHub Release
+    needs: [build-dmg]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -110,36 +116,42 @@ jobs:
         with:
           path: release-artifacts
 
-      - name: Prepare Release Assets
+      - name: Consolidate Release Assets
         run: |
           mkdir -p release-dist
           find release-artifacts -type f -name "*.dmg*" -exec cp {} release-dist/ \;
-          echo "=== Release Assets Prepared ==="
+          echo "=== Release Assets Ready for Publishing ==="
           ls -lh release-dist/
 
-      - name: Resolve Release Tag
-        id: release_meta
+      - name: Determine Release Tag
+        id: release_version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.version }}"
+            INPUT_VER="${{ github.event.inputs.version }}"
+            if [[ "$INPUT_VER" != v* ]]; then
+              TAG="v${INPUT_VER}"
+            else
+              TAG="${INPUT_VER}"
+            fi
           else
             TAG="${GITHUB_REF#refs/tags/}"
           fi
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${TAG#v}" >> $GITHUB_OUTPUT
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_meta.outputs.tag }}
-          name: AegisAI ${{ steps.release_meta.outputs.tag }} - Enterprise Offline Legal Assistant
+          tag_name: ${{ steps.release_version.outputs.tag }}
+          name: AegisAI v${{ steps.release_version.outputs.version }} - Enterprise Offline Legal Assistant
           draft: false
-          prerelease: false
+          prerelease: ${{ github.event.inputs.prerelease || false }}
           body: |
-            ## ⚖️ AegisAI Release 1.0.0
+            ## ⚖️ AegisAI Release ${{ steps.release_version.outputs.version }}
             
-            A production-ready, self-hosted, 100% offline Retrieval-Augmented Generation (RAG) assistant tailored for legal chambers, law firms, and corporate legal departments.
+            A production-ready, self-hosted, 100% offline Retrieval-Augmented Generation (RAG) assistant designed for law chambers, legal firms, and corporate legal departments.
             
-            ### ✨ Highlights in Release 1.0.0
+            ### ✨ Highlights & Capabilities
             - **⚡ LM Studio Native Integration**: Apple Silicon MLX GPU acceleration with token streaming and OpenAI-compatible API (`http://127.0.0.1:1234`).
             - **🛡️ Air-Gapped Confidentiality**: 100% offline operation with AES-256 encrypted storage, local ChromaDB vector store, and emergency panic-button wiping.
             - **⚖️ eCourts CNR Sync & Lock**: Automatic case status synchronization and local tamper-proof locking.
@@ -148,8 +160,9 @@ jobs:
             - **🖥️ Standalone Desktop App**: Bundled standalone FastAPI executable and Next.js frontend packed in native macOS DMG installer.
             
             ### 📦 Download Packages
-            - **Apple Silicon (M1/M2/M3/M4)**: `AegisAI-1.0.0-arm64.dmg`
-            - **Intel Macs (x86_64)**: `AegisAI-1.0.0-x64.dmg`
+            - **Apple Silicon (M1/M2/M3/M4 - arm64)**: `AegisAI-${{ steps.release_version.outputs.version }}-arm64.dmg`
+            - **Intel Macs (x86_64 - x64)**: `AegisAI-${{ steps.release_version.outputs.version }}-x64.dmg`
+            - **Integrity Checksums**: Corresponding `.dmg.sha256` files
           files: |
             release-dist/*.dmg
             release-dist/*.sha256
