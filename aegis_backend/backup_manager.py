@@ -26,12 +26,17 @@ class BackupManager:
     @staticmethod
     def get_aes_key() -> bytes:
         """Loads and returns raw 32-byte key for AES-256 GCM."""
-        from aegis_backend.database import get_secure_key, KEY_PATH
-        key_data = get_secure_key("aegis_master_key", KEY_PATH, is_hex=False)
+        from aegis_backend.database import master_key
+        key_data = master_key
         if isinstance(key_data, str):
             key_data = key_data.encode("utf-8")
-        # Decode url-safe base64 key to get raw 32 bytes
-        return base64.urlsafe_b64decode(key_data)
+        try:
+            raw = base64.urlsafe_b64decode(key_data)
+            if len(raw) == 32:
+                return raw
+        except Exception:
+            pass
+        return hashlib.sha256(key_data).digest()
 
     @classmethod
     def encrypt_data(cls, data: bytes) -> bytes:

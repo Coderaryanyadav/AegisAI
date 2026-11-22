@@ -174,10 +174,17 @@ def get_secure_key(key_name: str, fallback_path: str, is_hex: bool = False):
                     return decrypted_val.decode("utf-8").strip()
                 return decrypted_val
             except Exception:
-                # Fallback: if it was saved unencrypted, return raw value
+                # Fallback: if it was saved unencrypted, return raw value if valid
                 if is_hex:
-                    return encrypted_val.decode("utf-8").strip()
-                return encrypted_val
+                    val_str = encrypted_val.decode("utf-8", errors="ignore").strip()
+                    if len(val_str) >= 32:
+                        return val_str
+                else:
+                    try:
+                        Fernet(encrypted_val)
+                        return encrypted_val
+                    except Exception:
+                        pass
         except Exception:
             pass
             

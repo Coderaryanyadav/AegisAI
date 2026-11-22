@@ -74,26 +74,26 @@ if not exist "aegis_frontend\node_modules" (
 :: Ensure data directories exist
 if not exist "data" mkdir "data"
 
-:: Check for Ollama Setup
-where ollama >nul 2>&1
+:: Check for Local AI (LM Studio on port 1234 primary, Ollama fallback)
+powershell -Command "try { $r = Invoke-WebRequest -Uri http://127.0.0.1:1234/v1/models -UseBasicParsing -TimeoutSec 2; exit 0 } catch { exit 1 }" >nul 2>&1
 if %errorlevel% eq 0 (
-    echo [*] Ollama CLI detected.
-    :: Check if Ollama is running on port 11434 (using PowerShell curl/web request)
-    powershell -Command "try { $r = Invoke-WebRequest -Uri http://127.0.0.1:11434/api/tags -UseBasicParsing -TimeoutSec 2; exit 0 } catch { exit 1 }" >nul 2>&1
-    if %errorlevel% eq 0 (
-        echo [*] Ollama service is active and running.
-    ) else (
-        echo ----------------------------------------------------------
-        echo [WARNING] Ollama service is not running on port 11434.
-        echo Please start the Ollama desktop app or service.
-        echo ----------------------------------------------------------
-    )
+    echo [*] LM Studio Local AI service is active and running on port 1234.
 ) else (
-    echo ----------------------------------------------------------
-    echo [WARNING] Ollama CLI was not found in your PATH.
-    echo Aegis AI runs 100% locally and requires Ollama.
-    echo Please download and install it from: https://ollama.com/
-    echo ----------------------------------------------------------
+    where lms >nul 2>&1
+    if %errorlevel% eq 0 (
+        echo [*] LM Studio CLI detected. Starting server...
+        lms server start --cors >nul 2>&1
+    ) else (
+        where ollama >nul 2>&1
+        if %errorlevel% eq 0 (
+            echo [*] Ollama CLI detected.
+        ) else (
+            echo ----------------------------------------------------------
+            echo [INFO] LM Studio is recommended for local legal reasoning.
+            echo Please ensure LM Studio Local Server is running on port 1234.
+            echo ----------------------------------------------------------
+        )
+    )
 )
 
 echo ==========================================================

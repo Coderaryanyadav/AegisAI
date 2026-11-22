@@ -32,123 +32,95 @@ logger = logging.getLogger("aegis_ai.backend")
 # Initialize database schemas
 init_db()
 
-ollama_process = None
+ai_subprocess = None
 
-async def ensure_ollama_runtime():
-    """Starts local Ollama daemon if offline and pre-pulls reasoning models."""
+async def ensure_local_ai_runtime():
+    """Starts local LM Studio (primary) or Ollama (fallback) daemon if offline."""
     import subprocess
     import shutil
-    global ollama_process
+    global ai_subprocess
     
-    # 1. Check if Ollama is running
-    is_running = await OllamaService.is_ollama_running()
-    if not is_running:
-        logger.info("Ollama is not running. Attempting to start local Ollama service...")
+    # 1. Check if LM Studio is already running on port 1234
+    if await OllamaService.is_lmstudio_running():
+        models = await OllamaService.get_available_models()
+        logger.info(f"LM Studio local AI service is online on port 1234. Active models: {models}")
+        return
+
+    # 2. Try starting LM Studio via lms CLI
+    clean_env = dict(os.environ)
+    clean_env.pop("ELECTRON_RUN_AS_NODE", None)
+    lms_path = shutil.which("lms")
+    if not lms_path:
+        home_lms = os.path.expanduser("~/.lmstudio/bin/lms")
+        if os.path.exists(home_lms):
+            lms_path = home_lms
+
+    if lms_path:
+        logger.info(f"Attempting to launch LM Studio server via CLI: {lms_path} server start --cors")
+        try:
+            subprocess.run([lms_path, "server", "start", "--cors"], env=clean_env, capture_output=True, timeout=10)
+        except Exception as e:
+            logger.warning(f"Failed to start LM Studio server via lms: {e}")
+
+        # Wait for LM Studio to respond
+        for _ in range(6):
+            await asyncio.sleep(1.0)
+            if await OllamaService.is_lmstudio_running():
+                models = await OllamaService.get_available_models()
+                logger.info(f"LM Studio came online successfully! Available models: {models}")
+                return
+
+    # 3. Fallback: Check if Ollama is running or can be started
+    is_ollama = await OllamaService.is_ollama_running()
+    if not is_ollama:
+        logger.info("LM Studio not found. Checking Ollama fallback...")
         try:
             ollama_path = shutil.which("ollama")
-            if not ollama_path:
-                if sys.platform == "darwin":
-                    for path in ["/Applications/Ollama.app/Contents/Resources/ollama", "/usr/local/bin/ollama"]:
-                        if os.path.exists(path):
-                            ollama_path = path
-                            break
-                elif sys.platform == "win32":
-                    local_app_data = os.environ.get("LOCALAPPDATA", "")
-                    win_path = os.path.join(local_app_data, "Programs", "Ollama", "ollama.exe")
-                    if os.path.exists(win_path):
-                        ollama_path = win_path
- 
+            if not ollama_path and sys.platform == "darwin":
+                for path in ["/Applications/Ollama.app/Contents/Resources/ollama", "/usr/local/bin/ollama", "/opt/homebrew/bin/ollama"]:
+                    if os.path.exists(path):
+                        ollama_path = path
+                        break
             if ollama_path:
-                logger.info(f"Spawning background Ollama daemon programmatically: {ollama_path} serve")
-                ollama_process = subprocess.Popen([ollama_path, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            else:
-                logger.info("Ollama binary not found in common locations. Attempting standard command execute...")
-                ollama_process = subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                logger.info(f"Spawning background Ollama daemon: {ollama_path} serve")
+                ai_subprocess = subprocess.Popen([ollama_path, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                for _ in range(8):
+                    await asyncio.sleep(1.0)
+                    if await OllamaService.is_ollama_running():
+                        logger.info("Ollama fallback service online.")
+                        break
         except Exception as e:
-            logger.error(f"Failed to start Ollama daemon automatically: {e}")
+            logger.debug(f"Ollama startup attempt: {e}")
 
-        # 2. Wait up to 12 seconds for Ollama to start responding
-        for _ in range(12):
-            await asyncio.sleep(1.0)
-            if await OllamaService.is_ollama_running():
-                logger.info("Ollama service came online successfully.")
-                break
+    models = await OllamaService.get_available_models()
+    if models:
+        logger.info(f"Local AI inference runtime initialized with models: {models}")
     else:
-        logger.info("Ollama service is already online.")
+        logger.warning("No local models detected. Please launch LM Studio and load a model.")
 
-    # 3. Check and pull mistral:latest if missing, and auto-register offline model bundle if aegis-default is missing
-    if await OllamaService.is_ollama_running():
-        models = await OllamaService.get_available_models()
-        
-        # Auto-register local bundled model 'aegis-default'
-        if not any("aegis-default" in m for m in models):
-            logger.info("Aegis-default model is missing from Ollama. Checking offline bundle...")
-            if hasattr(sys, '_MEIPASS'):
-                bundle_dir = os.path.join(sys._MEIPASS, "aegis_backend", "model_bundle")
-            else:
-                bundle_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_bundle")
-            
-            gguf_path = os.path.join(bundle_dir, "aegis-base.gguf")
-            is_stub = False
-            if os.path.exists(gguf_path):
-                try:
-                    with open(gguf_path, "rb") as f:
-                        header = f.read(64)
-                        if b"GGUF_MOCK_MODEL_DATA" in header or not header.startswith(b"GGUF"):
-                            is_stub = True
-                except Exception:
-                    pass
-            else:
-                is_stub = True
-
-            modelfile_path = os.path.join(bundle_dir, "Modelfile")
-            if is_stub:
-                logger.warning("Aegis-default model bundle uses a mock GGUF placeholder. Skipping auto-registration. Please pull a standard model (e.g. mistral) or replace model_bundle/aegis-base.gguf with a valid GGUF model.")
-            elif os.path.exists(modelfile_path):
-                try:
-                    subprocess.Popen(["ollama", "create", "aegis-default", "-f", modelfile_path],
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    logger.info("Successfully initiated offline model creation for 'aegis-default'.")
-                except Exception as e:
-                    logger.error(f"Failed to auto-register bundled model: {e}")
-            else:
-                logger.warning(f"Offline model bundle Modelfile not found at: {modelfile_path}")
-
-        target_model = "mistral:latest"
-        has_model = any(target_model in m or "deepseek-r1" in m for m in models)
-        if not has_model:
-            logger.info(f"Target model '{target_model}' is not present in local list: {models}. Initiating background pull...")
-            asyncio.create_task(OllamaService.pull_model(target_model))
-        else:
-            logger.info(f"Target model '{target_model}' is already present. Ready for local queries.")
-    else:
-        logger.warning("Could not establish connection to Ollama. Automatic model pre-pull skipped.")
-
-async def monitor_ollama_runtime():
-    """Watchdog loop to ensure background Ollama remains running during execution."""
-    global ollama_process
+async def monitor_local_ai_runtime():
+    """Watchdog loop to ensure programmatically spawned AI service remains running."""
+    global ai_subprocess
     while True:
-        await asyncio.sleep(10.0)
-        # Only supervise if we programmatically started it
-        if ollama_process is not None:
-            if ollama_process.poll() is not None:
-                logger.warning("Programmatically spawned Ollama process terminated unexpectedly. Restarting...")
-                ollama_process = None
-                await ensure_ollama_runtime()
+        await asyncio.sleep(15.0)
+        if ai_subprocess is not None and ai_subprocess.poll() is not None:
+            logger.warning("Programmatically spawned AI process terminated unexpectedly. Restarting...")
+            ai_subprocess = None
+            await ensure_local_ai_runtime()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Schedule automated snapshot every hour
     backup_task = asyncio.create_task(run_backup_scheduler(interval_seconds=3600, retention_limit=5))
-    # Spin up background Ollama checks and auto-launcher
-    ollama_task = asyncio.create_task(ensure_ollama_runtime())
+    # Spin up background Local AI runtime checks (LM Studio / Ollama)
+    ai_task = asyncio.create_task(ensure_local_ai_runtime())
     # Spin up subprocess watchdog monitor
-    watchdog_task = asyncio.create_task(monitor_ollama_runtime())
+    watchdog_task = asyncio.create_task(monitor_local_ai_runtime())
     yield
     # Clean up background tasks on shutdown
     logger.info("AegisAI backend shutting down. Cleaning up background tasks...")
     backup_task.cancel()
-    ollama_task.cancel()
+    ai_task.cancel()
     watchdog_task.cancel()
     
     # Close HTTP connection pool
@@ -160,27 +132,20 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Error closing HTTP client pool: {e}")
 
     try:
-        await asyncio.gather(backup_task, ollama_task, watchdog_task, return_exceptions=True)
+        await asyncio.gather(backup_task, ai_task, watchdog_task, return_exceptions=True)
     except Exception as e:
         logger.warning(f"Error during lifespan shutdown cleanup: {e}")
 
-    # Clean up programmatically started Ollama process
-    global ollama_process
-    if ollama_process:
-        logger.info("Terminating programmatically spawned Ollama subprocess...")
+    # Clean up programmatically started subprocess if any
+    global ai_subprocess
+    if ai_subprocess:
+        logger.info("Terminating programmatically spawned AI subprocess...")
         try:
-            ollama_process.terminate()
-            for _ in range(5):
-                if ollama_process.poll() is not None:
-                    break
-                await asyncio.sleep(1.0)
-            if ollama_process.poll() is None:
-                logger.warning("Ollama process did not terminate. Killing process...")
-                ollama_process.kill()
-                ollama_process.wait()
-            logger.info("Ollama subprocess cleaned up successfully.")
+            ai_subprocess.terminate()
+            ai_subprocess.wait(timeout=5)
+            logger.info("AI subprocess cleaned up successfully.")
         except Exception as e:
-            logger.error(f"Failed to clean up Ollama subprocess: {e}")
+            logger.error(f"Failed to clean up AI subprocess: {e}")
 
 test_mode = os.environ.get("AEGIS_TEST_MODE") == "true"
 app = FastAPI(
@@ -267,6 +232,11 @@ from aegis_backend.routers.backup import router as backup_router
 from aegis_backend.routers.system import router as system_router
 from aegis_backend.routers.analytics import router as analytics_router
 from aegis_backend.routers.annotations import router as annotations_router
+
+@app.get("/health")
+@app.get("/api/health")
+async def root_health_check():
+    return {"status": "healthy"}
 
 for r in [
     auth_router, clients_router, matters_router, schedules_router,

@@ -122,14 +122,16 @@ async def export_signed_audit_logs(db: AsyncSession = Depends(get_db), current_u
     )
 
 @router.get("/system/models")
-async def list_ollama_models(current_user: User = Depends(get_current_user)):
+async def list_ai_models(current_user: User = Depends(get_current_user)):
     models = await OllamaService.get_available_models()
     return {"models": models}
 
 @router.get("/system/status")
 async def system_diagnostics(db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_admin)):
     models = await OllamaService.get_available_models()
-    ollama_running = len(models) > 0
+    lmstudio_running = await OllamaService.is_lmstudio_running()
+    ollama_running = await OllamaService.is_ollama_running()
+    ai_connected = lmstudio_running or ollama_running or len(models) > 0
 
     doc_res = await db.execute(select(func.count(Document.id)))
     doc_count = doc_res.scalar()
@@ -145,7 +147,10 @@ async def system_diagnostics(db: AsyncSession = Depends(get_db), current_user: U
         db_size = os.path.getsize(DB_PATH)
 
     return {
-        "ollama_connected": ollama_running,
+        "ai_connected": ai_connected,
+        "lmstudio_connected": lmstudio_running,
+        "ollama_connected": ai_connected,
+        "ai_runtime": "lmstudio" if lmstudio_running else ("ollama" if ollama_running else "offline"),
         "models_available": models,
         "database_size_bytes": db_size,
         "registered_clients": client_count,

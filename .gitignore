@@ -26,6 +26,7 @@ __pycache__/
 build/
 dist/
 *.spec
+!aegis_backend.spec
 
 # Electron & Next.js desktop packaging exclusions
 aegis_desktop/node_modules/

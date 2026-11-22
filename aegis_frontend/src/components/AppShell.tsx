@@ -236,11 +236,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="text-[10px] font-bold text-zinc-400 bg-zinc-900/80 border border-zinc-800/80 px-2.5 py-1 rounded-full font-mono uppercase tracking-wider">
             🛡️ {currentUser?.role || "loading"}
           </span>
-          {/* Ollama offline status */}
+          {/* AI runtime offline/online status */}
           <div className="flex items-center gap-2 ml-2 bg-zinc-900/40 border border-zinc-900 px-3 py-1 rounded-full">
             <div className={`w-2 h-2 rounded-full ${systemStatus.ollama_connected ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`} />
             <span className="text-[9px] text-zinc-400 font-mono font-bold tracking-wider">
-              AI RUNTIME: {systemStatus.ollama_connected ? "ONLINE" : "OFFLINE"}
+              AI RUNTIME: {systemStatus.ollama_connected ? (systemStatus.lmstudio_connected ? "LM STUDIO (ONLINE)" : "ONLINE") : "OFFLINE"}
             </span>
           </div>
           {systemStatus.memory && !systemStatus.memory.inference_allowed && (

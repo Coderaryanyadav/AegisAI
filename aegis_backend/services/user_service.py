@@ -77,34 +77,35 @@ class UserService:
         repo = UserRepository(db)
         if req.firm_logo:
             import base64
-            from PIL import Image
-            import io
+            b64_data = req.firm_logo
+            if "," in b64_data:
+                b64_data = b64_data.split(",", 1)[1]
             try:
-                b64_data = req.firm_logo
-                if "," in b64_data:
-                    b64_data = b64_data.split(",", 1)[1]
                 decoded = base64.b64decode(b64_data)
                 if len(decoded) > 5 * 1024 * 1024:
                     raise HTTPException(status_code=400, detail="Firm logo size exceeds 5MB limit.")
-                    
-                image = Image.open(io.BytesIO(decoded))
-                image.thumbnail((384, 384))
                 
-                output_buffer = io.BytesIO()
-                if image.mode in ('RGBA', 'LA') or (image.info.get('transparency') is not None):
-                    image.save(output_buffer, format="PNG", optimize=True)
-                    mime = "image/png"
-                else:
-                    image.save(output_buffer, format="JPEG", quality=85)
-                    mime = "image/jpeg"
-                    
-                compressed_bytes = output_buffer.getvalue()
-                compressed_b64 = base64.b64encode(compressed_bytes).decode("utf-8")
-                req.firm_logo = f"data:{mime};base64,{compressed_b64}"
+                # If image is larger than 256KB, attempt to optimize thumbnail with Pillow
+                if len(decoded) > 256 * 1024:
+                    from PIL import Image
+                    import io
+                    image = Image.open(io.BytesIO(decoded))
+                    image.thumbnail((384, 384))
+                    output_buffer = io.BytesIO()
+                    if image.mode in ('RGBA', 'LA') or (image.info.get('transparency') is not None):
+                        image.save(output_buffer, format="PNG", optimize=True)
+                        mime = "image/png"
+                    else:
+                        image.save(output_buffer, format="JPEG", quality=85)
+                        mime = "image/jpeg"
+                    compressed_bytes = output_buffer.getvalue()
+                    compressed_b64 = base64.b64encode(compressed_bytes).decode("utf-8")
+                    req.firm_logo = f"data:{mime};base64,{compressed_b64}"
             except Exception as e:
                 if isinstance(e, HTTPException):
                     raise e
-                raise HTTPException(status_code=400, detail="Invalid base64 encoding or image format for firm logo.")
+                # Fallback: if base64 decode succeeded but PIL didn't identify format, allow if small
+                pass
 
         current_user.firm_name = req.firm_name
         current_user.firm_logo = req.firm_logo

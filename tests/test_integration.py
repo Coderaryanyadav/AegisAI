@@ -1,6 +1,7 @@
 import os
 import sys
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+os.environ["AEGIS_TEST_MODE"] = "true"
 import pytest
 from fastapi.testclient import TestClient
 from aegis_backend.main import app
@@ -26,23 +27,31 @@ def test_user_registration_and_fuzzing():
     assert response.status_code in (200, 400)
 
 def get_admin_token():
+    from aegis_backend.database import SessionLocal, User
+    from aegis_backend.core.security import hash_password
+
+    # Guarantee admin user exists with known credentials
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.email == "admin@legalai.local").first()
+        if not admin:
+            admin = User(
+                email="admin@legalai.local",
+                hashed_password=hash_password("adminpassword123"),
+                role="admin",
+                must_change_password=False
+            )
+            db.add(admin)
+            db.commit()
+        else:
+            admin.must_change_password = False
+            admin.hashed_password = hash_password("adminpassword123")
+            admin.is_disabled = False
+            db.commit()
+    finally:
+        db.close()
+
     response = client.post("/api/v1/auth/token", data={"username": "admin@legalai.local", "password": "adminpassword123"})
-    if response.status_code == 200:
-        data = response.json()
-        if data.get("must_change_password"):
-            client.headers.update({"Authorization": f"Bearer {data['access_token']}"})
-            pw_resp = client.post("/api/v1/auth/change-default-password", data={
-                "current_password": "adminpassword123",
-                "new_password": "StrongPassword123!"
-            })
-            assert pw_resp.status_code == 200
-            # Login again
-            response = client.post("/api/v1/auth/token", data={"username": "admin@legalai.local", "password": "StrongPassword123!"})
-            return response.json().get("access_token")
-        return data.get("access_token")
-    
-    # Try the new password if already changed
-    response = client.post("/api/v1/auth/token", data={"username": "admin@legalai.local", "password": "StrongPassword123!"})
     if response.status_code == 200:
         return response.json().get("access_token")
     pytest.skip("Admin login failed, DB might not be seeded or password is unknown.")

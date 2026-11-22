@@ -1,10 +1,11 @@
 import os
 import asyncio
 import logging
-from typing import List
+from typing import List, Optional, Tuple
 from concurrent.futures import ProcessPoolExecutor
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from aegis_backend.database import AsyncSessionLocal, Document
+from aegis_backend.database import AsyncSessionLocal, Document, User, AEGIS_DIR
 from aegis_backend.vector_store import vector_store
 from aegis_backend.document_processor import DocumentProcessor
 

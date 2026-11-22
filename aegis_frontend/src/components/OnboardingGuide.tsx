@@ -53,7 +53,7 @@ export const OnboardingGuide: React.FC<OnboardingGuideProps> = ({
                   : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200"
               }`}
             >
-              Step {s}: {s === 1 ? "Ollama Runtime" : s === 2 ? "Legal Models" : "MFA Recovery Key"}
+              Step {s}: {s === 1 ? "Local AI Runtime" : s === 2 ? "Legal Models" : "MFA Recovery Key"}
             </button>
           ))}
         </div>
@@ -63,18 +63,18 @@ export const OnboardingGuide: React.FC<OnboardingGuideProps> = ({
           {step === 1 && (
             <div className="space-y-4 animate-fade-in text-xs">
               <h3 className="font-bold text-zinc-200 text-sm flex items-center gap-1.5">
-                1. Local Ollama Service Configuration
+                1. Local AI Engine Configuration (LM Studio / Ollama)
               </h3>
               <p className="text-zinc-400 leading-relaxed text-[11px]">
-                AegisAI runs completely offline. To enable generative legal reasoning (RAG) and contract auditing, you must run the Ollama service locally on your host OS.
+                AegisAI runs completely offline and confidential. For maximum inference speed and Apple Silicon GPU acceleration, AegisAI integrates natively with LM Studio (Port 1234) or Ollama (Port 11434).
               </p>
               
               <div className="bg-zinc-950/90 border border-zinc-900 rounded-xl p-3.5 space-y-2 text-[10px] font-mono text-zinc-300">
-                <p className="text-zinc-450">{"// Instructions to start local Ollama service:"}</p>
-                <p>1. Download & Install Ollama from <a href="https://ollama.com" target="_blank" rel="noreferrer" className="text-violet-400 underline">https://ollama.com</a></p>
-                <p>2. Open your system shell and verify execution:</p>
+                <p className="text-zinc-450">{"// Option A (Recommended): LM Studio Local Server"}</p>
+                <p>1. Open LM Studio app and start local server on port 1234, or run via CLI:</p>
+                <p className="text-amber-400 select-all">lms server start --cors</p>
+                <p className="text-zinc-450">{"// Option B (Fallback): Ollama"}</p>
                 <p className="text-amber-400 select-all">ollama serve</p>
-                <p>3. If using Docker containers, ensure host connectivity ports are bridged.</p>
               </div>
 
               <div className="flex items-center justify-between border-t border-zinc-900/80 pt-3.5">
@@ -97,17 +97,15 @@ export const OnboardingGuide: React.FC<OnboardingGuideProps> = ({
           {step === 2 && (
             <div className="space-y-4 animate-fade-in text-xs">
               <h3 className="font-bold text-zinc-200 text-sm flex items-center gap-1.5">
-                2. Install Local Reasoning Weights
+                2. Select & Load Legal Reasoning Weights
               </h3>
               <p className="text-zinc-400 leading-relaxed text-[11px]">
-                AegisAI is fine-tuned to compile queries against **DeepSeek-R1** and **Mistral** open-weight models. Run the pull command locally:
+                AegisAI performs best with high-performance open legal and coding models (such as Qwen 2.5 14B, DeepSeek-R1, or Mistral):
               </p>
 
               <div className="bg-zinc-950/90 border border-zinc-900 rounded-xl p-3.5 space-y-2 text-[10px] font-mono text-zinc-300">
-                <p className="text-zinc-450">{"# Command to download deepseek reasoning model:"}</p>
-                <p className="text-amber-400 select-all">ollama pull deepseek-r1:8b</p>
-                <p className="text-zinc-450">{"# Command to download mistral model:"}</p>
-                <p className="text-amber-400 select-all">ollama pull mistral:latest</p>
+                <p className="text-zinc-450">{"# In LM Studio: Search and load your preferred model (e.g. Qwen 2.5 Coder 14B or DeepSeek R1)"}</p>
+                <p className="text-amber-400 select-all">lms load qwen2.5-coder-14b-instruct-mlx</p>
               </div>
 
               <div>
