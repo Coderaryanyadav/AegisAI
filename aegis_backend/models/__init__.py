@@ -180,3 +180,16 @@ class RevokedToken(Base):
     id = Column(Integer, primary_key=True, index=True)
     token = Column(String, unique=True, index=True, nullable=False)
     revoked_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
+
+class LandmarkPrecedent(Base):
+    __tablename__ = "landmark_precedents"
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True, nullable=False)
+    citation = Column(String, index=True, nullable=False)
+    court = Column(String, default="Supreme Court of India", nullable=False)
+    year = Column(Integer, index=True, nullable=False)
+    bench = Column(String, nullable=True)
+    subject = Column(String, index=True, nullable=False)
+    sections_invoked = Column(String, nullable=True)
+    ratio_decidendi = Column(Text, nullable=False)
+    facts_summary = Column(Text, nullable=False)

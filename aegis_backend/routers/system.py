@@ -127,37 +127,43 @@ async def list_ai_models(current_user: User = Depends(get_current_user)):
     return {"models": models}
 
 @router.get("/system/status")
-async def system_diagnostics(db: AsyncSession = Depends(get_db), current_user: User = Depends(verify_admin)):
+async def system_diagnostics(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     models = await OllamaService.get_available_models()
     lmstudio_running = await OllamaService.is_lmstudio_running()
     ollama_running = await OllamaService.is_ollama_running()
     ai_connected = lmstudio_running or ollama_running or len(models) > 0
 
-    doc_res = await db.execute(select(func.count(Document.id)))
-    doc_count = doc_res.scalar()
-    
-    matter_res = await db.execute(select(func.count(Matter.id)))
-    matter_count = matter_res.scalar()
-    
-    client_res = await db.execute(select(func.count(Client.id)))
-    client_count = client_res.scalar()
-
-    db_size = 0
-    if os.path.exists(DB_PATH):
-        db_size = os.path.getsize(DB_PATH)
-
-    return {
+    base_status = {
         "ai_connected": ai_connected,
         "lmstudio_connected": lmstudio_running,
         "ollama_connected": ai_connected,
         "ai_runtime": "lmstudio" if lmstudio_running else ("ollama" if ollama_running else "offline"),
         "models_available": models,
-        "database_size_bytes": db_size,
-        "registered_clients": client_count,
-        "registered_matters": matter_count,
-        "vault_document_count": doc_count,
         "memory": MemoryGuard.get_memory_stats(),
     }
+
+    if current_user.role == "admin":
+        doc_res = await db.execute(select(func.count(Document.id)))
+        doc_count = doc_res.scalar()
+        
+        matter_res = await db.execute(select(func.count(Matter.id)))
+        matter_count = matter_res.scalar()
+        
+        client_res = await db.execute(select(func.count(Client.id)))
+        client_count = client_res.scalar()
+
+        db_size = 0
+        if os.path.exists(DB_PATH):
+            db_size = os.path.getsize(DB_PATH)
+
+        base_status.update({
+            "database_size_bytes": db_size,
+            "registered_clients": client_count,
+            "registered_matters": matter_count,
+            "vault_document_count": doc_count,
+        })
+
+    return base_status
 
 @router.get("/system/memory-status")
 def get_memory_status(current_user: User = Depends(get_current_user)):

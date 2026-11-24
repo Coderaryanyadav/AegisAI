@@ -87,3 +87,15 @@ class BackupService:
                             pass
             shutil.rmtree(chroma_dir, ignore_errors=True)
             os.makedirs(chroma_dir, exist_ok=True)
+
+        fts_path = os.path.join(AEGIS_DIR, "legal_fts.db")
+        for ext in ["", "-wal", "-shm"]:
+            target = f"{fts_path}{ext}"
+            if os.path.exists(target):
+                try:
+                    size = os.path.getsize(target)
+                    with open(target, "ba+", buffering=0) as f:
+                        f.write(os.urandom(size))
+                    os.remove(target)
+                except Exception:
+                    pass

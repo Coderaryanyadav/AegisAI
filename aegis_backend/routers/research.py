@@ -142,6 +142,50 @@ async def get_bare_act_section(
         raise HTTPException(status_code=404, detail="Bare Act section text not found in local library.")
     return {**lookup, "full_text": full_text}
 
+@router.get("/helper/precedents")
+async def list_or_search_precedents(
+    query: Optional[str] = None,
+    subject: Optional[str] = None,
+    limit: int = 50,
+    db_ro: AsyncSession = Depends(get_db_ro),
+    current_user: User = Depends(get_current_user)
+):
+    from aegis_backend.models import LandmarkPrecedent
+    from sqlalchemy import select, or_
+
+    stmt = select(LandmarkPrecedent)
+    if subject:
+        stmt = stmt.filter(LandmarkPrecedent.subject.ilike(f"%{subject}%"))
+    if query:
+        term = f"%{query}%"
+        stmt = stmt.filter(
+            or_(
+                LandmarkPrecedent.title.ilike(term),
+                LandmarkPrecedent.citation.ilike(term),
+                LandmarkPrecedent.subject.ilike(term),
+                LandmarkPrecedent.sections_invoked.ilike(term),
+                LandmarkPrecedent.ratio_decidendi.ilike(term)
+            )
+        )
+    stmt = stmt.order_by(LandmarkPrecedent.year.desc()).limit(limit)
+    res = await db_ro.execute(stmt)
+    precedents = res.scalars().all()
+    return [
+        {
+            "id": p.id,
+            "title": p.title,
+            "citation": p.citation,
+            "court": p.court,
+            "year": p.year,
+            "bench": p.bench,
+            "subject": p.subject,
+            "sections_invoked": p.sections_invoked,
+            "ratio_decidendi": p.ratio_decidendi,
+            "facts_summary": p.facts_summary
+        }
+        for p in precedents
+    ]
+
 @router.post("/analyze/cause-list")
 async def parse_cause_list(
     file: UploadFile = File(...),
@@ -407,6 +451,52 @@ def format_legal_draft(req: FormatDraftRequest, current_user: User = Depends(ver
     final_text = separator.join(formatted_lines)
     
     return {"formatted_draft": final_text}
+
+@router.post("/draft/export-docx")
+def export_draft_docx(req: FormatDraftRequest, current_user: User = Depends(verify_lawyer_or_admin)):
+    from aegis_backend.services.docx_service import DocxExportService
+    from fastapi.responses import Response
+
+    title = "LEGAL PETITION / PLEADINGS"
+    if req.court_header == "supreme_court":
+        title = "IN THE SUPREME COURT OF INDIA"
+    elif req.court_header == "high_court":
+        title = "IN THE HIGH COURT OF DELHI"
+    elif req.court_header == "district_court":
+        title = "IN THE DISTRICT & SESSIONS COURT"
+
+    buffer = DocxExportService.create_court_pleading_docx(
+        draft_text=req.draft_text,
+        title=title,
+        court_header=req.court_header
+    )
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": "attachment; filename=court_pleading_draft.docx"}
+    )
+
+@router.post("/audit/export-redline-docx")
+def export_audit_redline_docx(req: Dict[str, str], current_user: User = Depends(verify_lawyer_or_admin)):
+    from aegis_backend.services.docx_service import DocxExportService
+    from fastapi.responses import Response
+
+    original = req.get("original_text", "")
+    modified = req.get("modified_text", "")
+    title = req.get("title", "Contract Redline Audit")
+
+    buffer = DocxExportService.create_redline_docx(
+        original_text=original,
+        modified_text=modified,
+        title=title
+    )
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": "attachment; filename=contract_redline_audit.docx"}
+    )
 
 @router.post("/analyze/fir")
 async def analyze_fir_documents(req: FIRAnalysisRequest, db: AsyncSession = Depends(get_db), db_ro: AsyncSession = Depends(get_db_ro), current_user: User = Depends(get_current_user)):

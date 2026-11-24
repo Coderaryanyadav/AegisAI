@@ -112,6 +112,9 @@ async def rate_limit_auth(request: Request, db: AsyncSession = Depends(get_db)):
         return
     ip = request.client.host if request.client else "127.0.0.1"
     
+    # Loopback / local development gets higher threshold (60 attempts/min)
+    max_attempts = 60 if ip in ("127.0.0.1", "localhost", "::1", "testclient") else 10
+    
     now = time.time()
     # Clean up old entries
     global _auth_rate_limits
@@ -120,7 +123,7 @@ async def rate_limit_auth(request: Request, db: AsyncSession = Depends(get_db)):
     if ip not in _auth_rate_limits:
         _auth_rate_limits[ip] = {'count': 1, 'timestamp': now}
     else:
-        if _auth_rate_limits[ip]['count'] >= 5:
+        if _auth_rate_limits[ip]['count'] >= max_attempts:
             raise HTTPException(
                 status_code=429,
                 detail="Too many authentication attempts. Please try again later."

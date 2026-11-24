@@ -87,27 +87,34 @@ class DocumentProcessor:
             logger.warning("OCR is required for this scanned document, but Tesseract is not installed. Falling back to empty text.")
             return ""
 
-        ocr_text_content = []
-        
-        # Process pages sequentially or in small fixed batches to prevent memory and CPU exhaustion.
-        # This streams the OCR pipeline page by page.
-        for page_idx in range(len(doc)):
-            logger.info(f"Running OCR on page {page_idx + 1}/{len(doc)}...")
+        total_pages = len(doc)
+        logger.info(f"Initiating parallel multi-threaded OCR for {total_pages} pages...")
+
+        import concurrent.futures
+
+        def _process_page(idx: int) -> tuple[int, str]:
             try:
-                page = doc[page_idx]
+                page = doc[idx]
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
                 image_data = pix.tobytes("png")
                 image = Image.open(io.BytesIO(image_data))
                 text = pytesseract.image_to_string(image)
-                ocr_text_content.append(text)
-                # Note: Progress tracking could be hooked in here (e.g. updating a DB column)
+                return idx, text
             except Exception as e:
-                logger.error(f"OCR failed for page {page_idx + 1}: {e}")
-                # We append empty string so we don't crash the entire document processing
-                ocr_text_content.append("")
+                logger.error(f"OCR failed for page {idx + 1}: {e}")
+                return idx, ""
 
+        max_workers = min(4, os.cpu_count() or 2)
+        page_results = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {executor.submit(_process_page, i): i for i in range(total_pages)}
+            for future in concurrent.futures.as_completed(future_to_idx):
+                idx, text = future.result()
+                page_results[idx] = text
+
+        ocr_text_content = [page_results.get(i, "") for i in range(total_pages)]
         full_ocr_text = "\n".join(ocr_text_content).strip()
-        logger.info("Successfully extracted text using OCR.")
+        logger.info(f"Successfully extracted text from {total_pages} pages using parallel OCR.")
         return full_ocr_text
 
 

@@ -587,3 +587,156 @@ def test_token_revocation_logout():
         db.commit()
         db.close()
 
+def test_sqlite_fts5_store():
+    import tempfile
+    from aegis_backend.vector_store import SqliteFTS5Store
+
+    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+        fts = SqliteFTS5Store(tmp.name)
+        chunks = [
+            {"id": "c1", "content": "Section 439 CrPC governs regular bail in High Court or Session Court", "metadata": {"document_id": 101}},
+            {"id": "c2", "content": "Section 482 CrPC provides inherent powers of High Court to quash FIR", "metadata": {"document_id": 102}},
+            {"id": "c3", "content": "Commercial contract termination notice clause requires 30 days written notice", "metadata": {"document_id": 103}}
+        ]
+        fts.add_chunks(chunks)
+
+        # Search for bail
+        results = fts.search("bail")
+        assert len(results) >= 1
+        assert results[0]["id"] == "c1"
+        assert "439" in results[0]["content"]
+
+        # Search with document filter
+        filtered = fts.search("CrPC", document_ids=[102])
+        assert len(filtered) == 1
+        assert filtered[0]["id"] == "c2"
+
+def test_docx_export_service():
+    from aegis_backend.services.docx_service import DocxExportService
+
+    # Test Pleading Docx
+    pleading_buffer = DocxExportService.create_court_pleading_docx(
+        draft_text="IN THE HIGH COURT OF DELHI\nPETITIONER: ABC\nVERSUS\nRESPONDENT: XYZ\n\nPRAYER\nGrant regular bail under Section 483 BNSS.",
+        title="BAIL APPLICATION",
+        court_header="high_court"
+    )
+    assert pleading_buffer.getvalue().startswith(b"PK")  # Standard zip/docx magic bytes
+    assert len(pleading_buffer.getvalue()) > 1000
+
+    # Test Redline Docx
+    redline_buffer = DocxExportService.create_redline_docx(
+        original_text="The tenant shall pay monthly rent of ten thousand rupees on fifth of every month.",
+        modified_text="The tenant shall pay monthly rent of twelve thousand rupees on first of every month.",
+        title="Tenancy Agreement Redline"
+    )
+    assert redline_buffer.getvalue().startswith(b"PK")
+    assert len(redline_buffer.getvalue()) > 1000
+
+def test_ecourts_lookup_and_prefix_compatibility():
+    from fastapi.testclient import TestClient
+    from aegis_backend.main import app
+    from aegis_backend.database import SessionLocal, User
+    from aegis_backend.core.security import create_access_token
+
+    client = TestClient(app)
+    db = SessionLocal()
+    user = db.query(User).filter(User.email == "test_lawyer@legalai.local").first()
+    if not user:
+        user = User(email="test_lawyer@legalai.local", hashed_password=hash_password("Pass123!"), role="lawyer")
+        db.add(user)
+        db.commit()
+    token = create_access_token({"sub": user.email})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Test under /api/v1/
+    res_v1 = client.get("/api/v1/ecourts/lookup?cnr=DLHC010012342024", headers=headers)
+    assert res_v1.status_code == 200
+    data_v1 = res_v1.json()
+    assert data_v1["cnr"] == "DLHC010012342024"
+    assert "High Court of Delhi" in data_v1["court"]
+
+    # Test backward compatibility prefix under /api/
+    res_compat = client.get("/api/ecourts/lookup?cnr=DLHC010012342024", headers=headers)
+    assert res_compat.status_code == 200
+    assert res_compat.json()["cnr"] == "DLHC010012342024"
+
+    # Verify non-admin lawyer can access /api/v1/system/status without 403
+    status_res = client.get("/api/v1/system/status", headers=headers)
+    assert status_res.status_code == 200
+    assert "ai_connected" in status_res.json()
+    assert "models_available" in status_res.json()
+    db.close()
+
+def test_landmark_precedents_api():
+    from fastapi.testclient import TestClient
+    from aegis_backend.main import app
+    from aegis_backend.database import SessionLocal, User, LandmarkPrecedent
+    from aegis_backend.core.security import create_access_token
+
+    client = TestClient(app)
+    db = SessionLocal()
+    user = db.query(User).filter(User.email == "test_lawyer@legalai.local").first()
+    token = create_access_token({"sub": user.email})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Seed at least one precedent if empty
+    if db.query(LandmarkPrecedent).count() == 0:
+        db.add(LandmarkPrecedent(
+            title="K.S. Puttaswamy v. Union of India",
+            citation="(2017) 10 SCC 1",
+            court="Supreme Court of India",
+            year=2017,
+            subject="Right to Privacy",
+            ratio_decidendi="Privacy is a fundamental right under Article 21.",
+            facts_summary="Aadhaar privacy challenge."
+        ))
+        db.commit()
+
+    res = client.get("/api/v1/helper/precedents?query=Privacy", headers=headers)
+    assert res.status_code == 200
+    items = res.json()
+    assert len(items) >= 1
+    assert any("Privacy" in item["subject"] or "Privacy" in item["ratio_decidendi"] for item in items)
+    db.close()
+
+def test_crm_entity_graph_api():
+    from fastapi.testclient import TestClient
+    from aegis_backend.main import app
+    from aegis_backend.database import SessionLocal, User, Client, Matter
+    from aegis_backend.core.security import create_access_token
+
+    client = TestClient(app)
+    db = SessionLocal()
+    user = db.query(User).filter(User.email == "test_lawyer@legalai.local").first()
+    token = create_access_token({"sub": user.email})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Create client and matter with adverse opponent
+    c = Client(name="Graph Client Entity A", email="graph_a@example.com")
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+
+    m = Matter(
+        client_id=c.id,
+        title="Contract Dispute Matter X",
+        opponent_name="Adverse Opponent Corp",
+        opposing_advocate="Advocate Senior Partner"
+    )
+    db.add(m)
+    db.commit()
+
+    try:
+        res = client.get("/api/v1/crm/entity-graph", headers=headers)
+        assert res.status_code == 200
+        graph = res.json()
+        assert "nodes" in graph
+        assert "edges" in graph
+        assert any(n["label"] == "Graph Client Entity A" for n in graph["nodes"])
+        assert any(n["label"] == "Adverse Opponent Corp" for n in graph["nodes"])
+    finally:
+        db.delete(m)
+        db.delete(c)
+        db.commit()
+        db.close()
+

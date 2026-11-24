@@ -22,7 +22,7 @@ export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
     if (refreshToken) {
       const refreshFormData = new URLSearchParams();
       refreshFormData.append("refresh_token", refreshToken);
-      const refreshResponse = await fetch(`${API_BASE}/api/auth/refresh`, {
+      const refreshResponse = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: refreshFormData.toString()

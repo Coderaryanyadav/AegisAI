@@ -42,7 +42,7 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  token: typeof window !== "undefined" ? localStorage.getItem("aegis_token") || "" : "",
+  token: "",
   setToken: (token) => set({ token }),
   
   currentUser: null,

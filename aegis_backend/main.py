@@ -184,21 +184,35 @@ if os.environ.get("AEGIS_OTEL_ENABLED") == "true":
         commenter_options={}
     )
 
-# Allow CORS dynamically from environment, defaulting to local Electron/Next.js frontend
+# Allow CORS dynamically from environment, defaulting to local Electron/Next.js frontend on any local port
 cors_origins_env = os.environ.get("AEGIS_CORS_ORIGINS")
 if cors_origins_env:
     origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
 else:
-    origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:3002",
+        "http://127.0.0.1:3002",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "app://.",
+        "file://",
+    ]
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.middleware("http")
@@ -244,6 +258,7 @@ for r in [
     system_router, analytics_router, annotations_router
 ]:
     app.include_router(r, prefix="/api/v1")
+    app.include_router(r, prefix="/api")
 
 if __name__ == "__main__":
     import multiprocessing

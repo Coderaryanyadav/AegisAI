@@ -1,12 +1,19 @@
 import re
 from typing import List, Optional, Dict, Literal
 from datetime import date, datetime
-from pydantic import BaseModel, EmailStr, field_validator, Field
+from pydantic import BaseModel, EmailStr, field_validator, Field, ConfigDict
 
 class UserRegister(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
+    @field_validator("email")
+    @classmethod
+    def validate_email_format(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", v):
+            raise ValueError("Please provide a valid email address (e.g. advocate@firm.com).")
+        return v
 
     @field_validator("password")
     @classmethod
@@ -14,13 +21,13 @@ class UserRegister(BaseModel):
         if len(v) < 12:
             raise ValueError("Password must be at least 12 characters long.")
         if not re.search(r"[A-Z]", v):
-            raise ValueError("Password must contain at least one uppercase letter.")
+            raise ValueError("Password must contain at least one uppercase letter (A-Z).")
         if not re.search(r"[a-z]", v):
-            raise ValueError("Password must contain at least one lowercase letter.")
+            raise ValueError("Password must contain at least one lowercase letter (a-z).")
         if not re.search(r"\d", v):
-            raise ValueError("Password must contain at least one digit.")
+            raise ValueError("Password must contain at least one digit (0-9).")
         if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
-            raise ValueError("Password must contain at least one special character.")
+            raise ValueError("Password must contain at least one special character (!@#$%^&*...).")
         return v
 
 class UserResponse(BaseModel):
@@ -32,8 +39,7 @@ class UserResponse(BaseModel):
     gst_rate: Optional[float] = 18.0
     is_disabled: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class FirmSettingsUpdate(BaseModel):
     firm_name: str
@@ -54,8 +60,7 @@ class ClientResponse(BaseModel):
     notes: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class MatterCreate(BaseModel):
     client_id: int
@@ -95,8 +100,7 @@ class MatterResponse(BaseModel):
     is_locked: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ScheduleCreate(BaseModel):
     matter_id: int
@@ -114,8 +118,7 @@ class ScheduleResponse(BaseModel):
     notes: Optional[str] = None
     is_completed: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class DocumentResponse(BaseModel):
     id: int
@@ -126,8 +129,7 @@ class DocumentResponse(BaseModel):
     status: str
     uploaded_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ResearchQuery(BaseModel):
     query: str

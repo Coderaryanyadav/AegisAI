@@ -19,7 +19,7 @@ export function AnalyticsTab({
   const fetchAnalytics = async () => {
     setAnalyticsLoading(true);
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/analytics/summary`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/analytics/summary`);
       if (res.ok) {
         setAnalyticsData(await res.json());
       }

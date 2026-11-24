@@ -108,6 +108,33 @@ export function DraftingTab({
     }
   };
 
+  const handleExportDocx = async () => {
+    if (!generatedDraft) return;
+    try {
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/draft/export-docx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          draft_text: generatedDraft,
+          court_header: courtHeader,
+          line_spacing: parseFloat(lineSpacing),
+          margin_spaces: parseInt(marginSpaces, 10)
+        })
+      });
+      if (!response.ok) throw new Error("Failed to export Word document");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${selectedTemplate?.id || "legal_pleading"}_court_ready.docx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showNotification("Exported court-ready Word (.docx) document!", "success");
+    } catch (err: any) {
+      showNotification(err.message, "error");
+    }
+  };
+
   useEffect(() => {
     fetchDraftTemplates();
   }, []);
@@ -190,6 +217,12 @@ export function DraftingTab({
                     className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-zinc-200 transition cursor-pointer border-l border-zinc-800 pl-2"
                   >
                     <Download className="w-3 h-3 text-emerald-500" /> Export PDF
+                  </button>
+                  <button
+                    onClick={handleExportDocx}
+                    className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition cursor-pointer border-l border-zinc-800 pl-2 font-semibold"
+                  >
+                    <Download className="w-3 h-3 text-blue-500" /> Court Word (.docx)
                   </button>
                 </div>
               )}

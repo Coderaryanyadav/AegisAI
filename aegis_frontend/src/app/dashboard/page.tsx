@@ -20,7 +20,7 @@ export default function DashboardPage() {
   const { data: clients = [], refetch: fetchClients } = useQuery({
     queryKey: ["clients"],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API_BASE}/api/clients`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/clients`);
       if (res.ok) return res.json();
       throw new Error("Failed to fetch clients");
     }
@@ -29,7 +29,7 @@ export default function DashboardPage() {
   const { data: matters = [], refetch: fetchMatters } = useQuery({
     queryKey: ["matters", selectedClient?.id],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API_BASE}/api/matters?client_id=${selectedClient?.id}`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/matters?client_id=${selectedClient?.id}`);
       if (res.ok) return res.json();
       throw new Error("Failed to fetch matters");
     },
@@ -39,7 +39,7 @@ export default function DashboardPage() {
   const { data: schedules = [], refetch: fetchSchedules } = useQuery({
     queryKey: ["schedules", selectedMatter?.id],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API_BASE}/api/schedules?matter_id=${selectedMatter?.id}`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/schedules?matter_id=${selectedMatter?.id}`);
       if (res.ok) return res.json();
       throw new Error("Failed to fetch schedules");
     },
@@ -49,7 +49,7 @@ export default function DashboardPage() {
   const { data: documents = [], refetch: fetchDocuments } = useQuery({
     queryKey: ["documents", selectedMatter?.id],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API_BASE}/api/documents?matter_id=${selectedMatter?.id}`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/documents?matter_id=${selectedMatter?.id}`);
       if (res.ok) return res.json();
       throw new Error("Failed to fetch documents");
     },
@@ -68,7 +68,7 @@ export default function DashboardPage() {
 
   const fetchAnnotations = async (docId: number) => {
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/annotations/${docId}`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/annotations/${docId}`);
       if (res.ok) setDocAnnotations(await res.json());
     } catch {}
   };
@@ -81,7 +81,7 @@ export default function DashboardPage() {
     setAnnotationDocId(doc.id);
     fetchAnnotations(doc.id);
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/documents/${doc.id}/text`);
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/documents/${doc.id}/text`);
       if (response.ok) {
         const data = await response.json();
         setPreviewText(data.text);
@@ -130,7 +130,7 @@ export default function DashboardPage() {
           onSaveAnnotation={async (text, note, color) => {
             if (!annotationDocId) return;
             try {
-              const res = await fetchWithAuth(`${API_BASE}/api/annotations`, {
+              const res = await fetchWithAuth(`${API_BASE}/api/v1/annotations`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ document_id: annotationDocId, selected_text: text, note, color })
@@ -140,7 +140,7 @@ export default function DashboardPage() {
           }}
           onDeleteAnnotation={async (id) => {
             try {
-              const res = await fetchWithAuth(`${API_BASE}/api/annotations/${id}`, { method: "DELETE" });
+              const res = await fetchWithAuth(`${API_BASE}/api/v1/annotations/${id}`, { method: "DELETE" });
               if (res.ok && annotationDocId) fetchAnnotations(annotationDocId);
             } catch {}
           }}

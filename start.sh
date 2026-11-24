@@ -35,12 +35,17 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-$PYTHON_BIN -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 3000))" 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo "[!] Error: Port 3000 (Next.js React Frontend) is already in use."
-    echo "    Please stop any process running on port 3000."
-    exit 1
-fi
+# Dynamically find free frontend port
+FRONTEND_PORT=3000
+while ! $PYTHON_BIN -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', $FRONTEND_PORT))" 2>/dev/null; do
+    echo "[!] Port $FRONTEND_PORT is in use. Trying $((FRONTEND_PORT + 1))..."
+    FRONTEND_PORT=$((FRONTEND_PORT + 1))
+    if [ $FRONTEND_PORT -gt 3015 ]; then
+        echo "[!] Error: No free port found for frontend between 3000 and 3015."
+        exit 1
+    fi
+done
+echo "[*] Assigned Frontend Port: $FRONTEND_PORT"
 
 # Setup Virtual Environment if not present
 if [ ! -d "venv" ]; then
@@ -130,5 +135,5 @@ trap 'kill $(jobs -p)' EXIT
 PYTHONPATH=. "$VENV_PY" aegis_backend/main.py &
 
 # Launch Next.js frontend
-cd aegis_frontend && npm run dev
+cd aegis_frontend && npx next dev -p $FRONTEND_PORT
 

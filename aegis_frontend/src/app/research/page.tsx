@@ -15,7 +15,7 @@ export default function ResearchPage() {
   const { data: documents = [] } = useQuery({
     queryKey: ["documents", selectedMatter?.id],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API_BASE}/api/documents?matter_id=${selectedMatter?.id}`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/documents?matter_id=${selectedMatter?.id}`);
       if (res.ok) return res.json();
       throw new Error("Failed to fetch documents");
     },

@@ -82,6 +82,34 @@ export function AuditorTab({
     }
   };
 
+  const handleExportRedline = async () => {
+    if (!compareResults.length) return;
+    const docAText = compareResults.map((c: any) => `[${c.clause_title || "Clause"}]\n${c.doc_a_provision || ""}`).join("\n\n");
+    const docBText = compareResults.map((c: any) => `[${c.clause_title || "Clause"}]\n${c.doc_b_provision || ""}`).join("\n\n");
+    try {
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/audit/export-redline-docx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          original_text: docAText,
+          modified_text: docBText,
+          title: "Contract Variance Redline Audit"
+        })
+      });
+      if (!response.ok) throw new Error("Failed to export redline Word document");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "contract_variance_redline.docx";
+      link.click();
+      URL.revokeObjectURL(url);
+      showNotification("Exported Redline Word (.docx) audit!", "success");
+    } catch (err: any) {
+      showNotification(err.message, "error");
+    }
+  };
+
   const handleSimplifyClause = async () => {
     if (!simplifyClauseText.trim()) {
       showNotification("Please enter clause text to simplify", "warning");
@@ -245,6 +273,14 @@ export function AuditorTab({
               >
                 {isComparing ? "Comparing..." : "Run Variance Check"}
               </button>
+              {compareResults.length > 0 && (
+                <button
+                  onClick={handleExportRedline}
+                  className="w-full py-2 bg-blue-700 hover:bg-blue-650 text-white font-semibold rounded-lg text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow"
+                >
+                  <Download className="w-3.5 h-3.5" /> Export Redline Word (.docx)
+                </button>
+              )}
             </div>
           )}
 

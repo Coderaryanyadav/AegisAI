@@ -43,7 +43,7 @@ export function BackupTab({
 
   const fetchBackupHistory = async () => {
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/backup/history`);
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/backup/history`);
       if (response.ok) {
         const data = await response.json();
         setBackupHistory(data);
@@ -55,7 +55,7 @@ export function BackupTab({
 
   const fetchAuditLogs = async () => {
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/system/audit-logs`);
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/system/audit-logs`);
       if (response.ok) {
         const data = await response.json();
         setAuditLogs(data);
@@ -68,7 +68,7 @@ export function BackupTab({
   const handleRunManualBackup = async () => {
     setIsBackupRunning(true);
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/backup/create`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/backup/create`, {
         method: "POST"
       });
       if (response.ok) {
@@ -86,7 +86,7 @@ export function BackupTab({
   const handleTriggerRestore = async (backupPath: string) => {
     if (!confirm("Are you sure? Restoring will revert all active cases, files, and vector spaces to the chosen backup point.")) return;
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/backup/restore?backup_path=${encodeURIComponent(backupPath)}`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/backup/restore?backup_path=${encodeURIComponent(backupPath)}`, {
         method: "POST"
       });
       if (response.ok) {
@@ -105,7 +105,7 @@ export function BackupTab({
     setPanicLoading(true);
     setPanicResult(null);
     try {
-      const response = await fetchWithAuth(`${API_BASE}/api/backup/panic`, {
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/backup/panic`, {
         method: "POST"
       });
       if (response.ok) {
@@ -131,7 +131,7 @@ export function BackupTab({
   const handleExportAuditLogs = async () => {
     try {
       showNotification("Generating cryptographically signed audit report...", "info");
-      const response = await fetchWithAuth(`${API_BASE}/api/system/audit-logs/export`);
+      const response = await fetchWithAuth(`${API_BASE}/api/v1/system/audit-logs/export`);
       if (response.ok) {
         const text = await response.text();
         const blob = new Blob([text], { type: "text/plain" });

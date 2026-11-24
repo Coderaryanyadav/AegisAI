@@ -44,7 +44,7 @@ export function SettingsTab({
 
   const check2FAStatus = async () => {
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/2fa/status`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/2fa/status`);
       if (res.ok) {
         const d = await res.json();
         setTwoFaEnabled(d.enabled);
@@ -56,7 +56,7 @@ export function SettingsTab({
 
   const checkLicenseStatus = async () => {
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/system/license/status`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/system/license/status`);
       if (res.ok) {
         const d = await res.json();
         setLicenseStatus(d);
@@ -70,7 +70,7 @@ export function SettingsTab({
     if (!licenseKey) return;
     setLicenseLoading(true);
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/system/license/activate`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/system/license/activate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ license_key: licenseKey })
@@ -93,7 +93,7 @@ export function SettingsTab({
   const handle2FASetup = async () => {
     setTwoFaLoading(true);
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/2fa/setup`, { method: "POST" });
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/2fa/setup`, { method: "POST" });
       if (res.ok) {
         const d = await res.json();
         setTwoFaQr(d.qr_code_base64);
@@ -111,7 +111,7 @@ export function SettingsTab({
   const handle2FAEnable = async () => {
     if (!twoFaCode) return;
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/2fa/enable`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/2fa/enable`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ totp_code: twoFaCode })
@@ -131,7 +131,7 @@ export function SettingsTab({
 
   const handleSaveFirmSettings = async () => {
     try {
-      const res = await fetchWithAuth(`${API_BASE}/api/user/firm-settings`, {
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/user/firm-settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ firm_name: firmName, firm_logo: firmLogo, gst_rate: gstRate })

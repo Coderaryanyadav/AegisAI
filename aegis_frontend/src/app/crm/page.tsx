@@ -10,7 +10,7 @@ export default function CrmPage() {
   const { data: clients = [], refetch: fetchClients } = useQuery({
     queryKey: ["clients"],
     queryFn: async () => {
-      const res = await fetchWithAuth(`${API_BASE}/api/clients`);
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/clients`);
       if (res.ok) return res.json();
       throw new Error("Failed to fetch clients");
     }

@@ -1,5 +1,5 @@
 import React from "react";
-import { Shield, Lock } from "lucide-react";
+import { Shield, Lock, CheckCircle2, Circle } from "lucide-react";
 
 interface LoginViewProps {
   email: string;
@@ -28,6 +28,13 @@ export function LoginView({
   handleLogin,
   handleRegister
 }: LoginViewProps) {
+  const hasMinLen = password.length >= 12;
+  const hasUpper = /[A-Z]/.test(password);
+  const hasLower = /[a-z]/.test(password);
+  const hasDigit = /\d/.test(password);
+  const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+  const isPasswordValid = hasMinLen && hasUpper && hasLower && hasDigit && hasSpecial;
+
   return (
     <div className="min-h-screen flex items-center justify-center relative p-4 bg-[#030303] overflow-hidden bg-radial-glow">
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-zinc-800/10 opacity-30 blur-[130px]" />
@@ -51,22 +58,54 @@ export function LoginView({
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="advocate@firm.local"
+              placeholder="advocate@firm.com"
               className="w-full p-3 rounded-lg glass-input text-zinc-200 text-sm focus:border-zinc-500 font-medium bg-zinc-950 border border-zinc-805"
               required
             />
           </div>
           <div>
-            <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">Master Security PIN / Password</label>
+            <label className="block text-[10px] font-bold text-zinc-400 mb-1.5 uppercase tracking-wider font-mono">
+              {isRegisterMode ? "Choose Vault Master Password" : "Master Security PIN / Password"}
+            </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder={isRegisterMode ? "Min 12 chars, upper, lower, digit, symbol" : "••••••••"}
               className="w-full p-3 rounded-lg glass-input text-zinc-200 text-sm focus:border-zinc-500 bg-zinc-950 border border-zinc-805"
               required
             />
           </div>
+
+          {isRegisterMode && (
+            <div className="p-3 rounded-lg bg-zinc-950/80 border border-zinc-800/80 space-y-1.5">
+              <span className="text-[10px] font-semibold text-zinc-400 font-mono uppercase tracking-wider block mb-1">
+                Password Security Requirements:
+              </span>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
+                <div className={`flex items-center gap-1.5 ${hasMinLen ? "text-emerald-400" : "text-zinc-500"}`}>
+                  {hasMinLen ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <Circle className="w-3.5 h-3.5 shrink-0" />}
+                  <span>12+ characters</span>
+                </div>
+                <div className={`flex items-center gap-1.5 ${hasUpper ? "text-emerald-400" : "text-zinc-500"}`}>
+                  {hasUpper ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <Circle className="w-3.5 h-3.5 shrink-0" />}
+                  <span>1 uppercase (A-Z)</span>
+                </div>
+                <div className={`flex items-center gap-1.5 ${hasLower ? "text-emerald-400" : "text-zinc-500"}`}>
+                  {hasLower ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <Circle className="w-3.5 h-3.5 shrink-0" />}
+                  <span>1 lowercase (a-z)</span>
+                </div>
+                <div className={`flex items-center gap-1.5 ${hasDigit ? "text-emerald-400" : "text-zinc-500"}`}>
+                  {hasDigit ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <Circle className="w-3.5 h-3.5 shrink-0" />}
+                  <span>1 digit (0-9)</span>
+                </div>
+                <div className={`col-span-2 flex items-center gap-1.5 ${hasSpecial ? "text-emerald-400" : "text-zinc-500"}`}>
+                  {hasSpecial ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <Circle className="w-3.5 h-3.5 shrink-0" />}
+                  <span>1 special character (!@#$%^&*...)</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {twoFactorRequired && (
             <div>

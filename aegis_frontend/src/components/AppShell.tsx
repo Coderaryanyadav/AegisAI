@@ -64,6 +64,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const setActiveTab = useAppStore(state => state.setActiveTab);
 
   // Local Auth State
+  const [mounted, setMounted] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isRegisterMode, setIsRegisterMode] = useState(false);
@@ -79,7 +80,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: systemStatus = { ollama_connected: false }, refetch: fetchSystemStatus } = useQuery({
     queryKey: ["systemStatus"],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/api/system/status`, {
+      const res = await fetch(`${API_BASE}/api/v1/system/status`, {
         headers: token ? { "Authorization": `Bearer ${token}` } : {}
       });
       if (res.ok) return res.json();
@@ -92,7 +93,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const syncOnlineMode = async (online: boolean) => {
     if (!token) return;
     try {
-      await fetch(`${API_BASE}/api/system/connection-mode`, {
+      await fetch(`${API_BASE}/api/v1/system/connection-mode`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -113,7 +114,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         formData.append("totp_code", totpCode);
       }
 
-      const response = await fetch(`${API_BASE}/api/auth/token`, {
+      const response = await fetch(`${API_BASE}/api/v1/auth/token`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: formData.toString()
@@ -121,7 +122,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Invalid email or password");
+        let errMsg = "Invalid email or password";
+        if (typeof errorData.detail === "string") {
+          errMsg = errorData.detail;
+        } else if (Array.isArray(errorData.detail)) {
+          errMsg = errorData.detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join("; ");
+        } else if (errorData.message) {
+          errMsg = errorData.message;
+        }
+        throw new Error(errMsg);
       }
 
       const data = await response.json();
@@ -152,18 +161,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
-      const response = await fetch(`${API_BASE}/api/auth/register`, {
+      const response = await fetch(`${API_BASE}/api/v1/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email: email.trim(), password })
       });
 
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || "Registration failed");
+        const errData = await response.json().catch(() => ({}));
+        let errMsg = "Registration failed";
+        if (typeof errData.detail === "string") {
+          errMsg = errData.detail;
+        } else if (Array.isArray(errData.detail)) {
+          errMsg = errData.detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join("; ");
+        } else if (errData.message) {
+          errMsg = errData.message;
+        }
+        throw new Error(errMsg);
       }
 
-      showNotification("Account created! Please sign in.", "success");
+      showNotification("Account created successfully! Please sign in with your credentials.", "success");
       setPassword("");
       setIsRegisterMode(false);
     } catch (err: any) {
@@ -182,9 +199,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.push("/");
   };
 
+  // Load persisted token on mount to avoid SSR hydration mismatch
+  useEffect(() => {
+    const savedToken = localStorage.getItem("aegis_token");
+    if (savedToken) {
+      setToken(savedToken);
+    }
+    setMounted(true);
+  }, [setToken]);
+
   useEffect(() => {
     if (token) {
-      fetch(`${API_BASE}/api/auth/me`, {
+      fetch(`${API_BASE}/api/v1/auth/me`, {
         headers: { "Authorization": `Bearer ${token}` }
       })
       .then(res => {
@@ -203,6 +229,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setActiveTab(path);
     }
   }, [pathname]);
+
+  // Render consistent initial shell until mounted to eliminate SSR hydration mismatch
+  if (!mounted) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#030303] text-zinc-500 font-mono text-xs">
+        <div className="flex flex-col items-center gap-3">
+          <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-2xl animate-pulse">
+            <Shield className="w-6 h-6 text-zinc-400" />
+          </div>
+          <span className="tracking-widest uppercase text-[10px]">Initializing AegisAI Offline Vault...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!token) {
     return (
@@ -388,7 +428,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     setOnlineModeSyncing(true);
                     setOnlineModeResult(null);
                     try {
-                      const res = await fetch(`${API_BASE}/api/ecourts/lookup?cnr=${encodeURIComponent(onlineCnrNumber.trim())}`, {
+                      const res = await fetch(`${API_BASE}/api/v1/ecourts/lookup?cnr=${encodeURIComponent(onlineCnrNumber.trim())}`, {
                         headers: { Authorization: `Bearer ${token}` }
                       });
                       const data = await res.json();

@@ -226,7 +226,8 @@ from aegis_backend.models.base import EncryptedText
 from aegis_backend.models import (
     User, Client, Matter, Schedule, Document, AuditLog,
     BackupHistory, BareActSection, AuthRateLimit, TimeEntry,
-    Invoice, Annotation, TwoFactorSecret, StatutoryMapping, RevokedToken
+    Invoice, Annotation, TwoFactorSecret, StatutoryMapping, RevokedToken,
+    LandmarkPrecedent
 )
 
 
@@ -299,6 +300,124 @@ def init_db():
                     change_type=detail["change_type"],
                     description=detail["description"]
                 ))
+            db.commit()
+
+        # Seed landmark case precedents if empty
+        if db.query(LandmarkPrecedent).count() == 0:
+            precedents_seed = [
+                {
+                    "title": "Kesavananda Bharati v. State of Kerala",
+                    "citation": "(1973) 4 SCC 225",
+                    "court": "Supreme Court of India",
+                    "year": 1973,
+                    "bench": "13-Judge Constitutional Bench (S.M. Sikri C.J. et al.)",
+                    "subject": "Constitutional Law & Basic Structure Doctrine",
+                    "sections_invoked": "Constitution of India Art. 368, Art. 13, Art. 31C",
+                    "ratio_decidendi": "Parliament's amending power under Article 368 is wide but limited; it cannot alter, destroy or abrogate the Basic Structure or essential framework of the Constitution.",
+                    "facts_summary": "Challenge to Kerala Land Reforms Act and 24th, 25th, and 29th Constitutional Amendments curtailing property rights and testing limits of constitutional amendment power."
+                },
+                {
+                    "title": "Maneka Gandhi v. Union of India",
+                    "citation": "(1978) 1 SCC 248",
+                    "court": "Supreme Court of India",
+                    "year": 1978,
+                    "bench": "7-Judge Bench (M.H. Beg C.J., P.N. Bhagwati et al.)",
+                    "subject": "Personal Liberty & Due Process",
+                    "sections_invoked": "Constitution of India Art. 21, Art. 14, Art. 19; Passports Act 1967 S. 10(3)(c)",
+                    "ratio_decidendi": "Procedure established by law under Article 21 must not be arbitrary, fanciful or oppressive; it must be just, fair and reasonable, establishing substantive due process in Indian jurisprudence.",
+                    "facts_summary": "Impounding of petitioner's passport by the regional passport officer without supplying reasons in the interest of the general public."
+                },
+                {
+                    "title": "Justice K.S. Puttaswamy (Retd.) v. Union of India",
+                    "citation": "(2017) 10 SCC 1",
+                    "court": "Supreme Court of India",
+                    "year": 2017,
+                    "bench": "9-Judge Constitutional Bench (J.S. Khehar C.J., D.Y. Chandrachud et al.)",
+                    "subject": "Fundamental Right to Privacy & Informational Autonomy",
+                    "sections_invoked": "Constitution of India Art. 21, Art. 14, Art. 19; Aadhaar Act",
+                    "ratio_decidendi": "Privacy is a fundamental right emanating from the guarantee of life and personal liberty under Article 21 and Part III. Any state encroachment must satisfy legality, legitimate state aim, and proportionality.",
+                    "facts_summary": "Constitutional challenge to the mandatory rollout of biometric Aadhaar identifiers and whether privacy is an intrinsic fundamental right."
+                },
+                {
+                    "title": "Arnesh Kumar v. State of Bihar",
+                    "citation": "(2014) 8 SCC 273",
+                    "court": "Supreme Court of India",
+                    "year": 2014,
+                    "bench": "2-Judge Bench (Chandramauli Kr. Prasad, Pinaki Chandra Ghose JJ.)",
+                    "subject": "Criminal Procedure & Prevention of Arbitrary Arrest",
+                    "sections_invoked": "IPC S. 498A (BNS S. 85); CrPC S. 41, 41A (BNSS S. 35)",
+                    "ratio_decidendi": "Police officers shall not automatically arrest accused in cases where offence carries imprisonment up to 7 years. Mandatory compliance with notice of appearance under Section 41A CrPC and recording of checklist before Magistrate.",
+                    "facts_summary": "Anticipatory bail petition stemming from matrimonial harassment allegations highlighting rampant misuse of Section 498A IPC."
+                },
+                {
+                    "title": "Lalita Kumari v. Govt. of Uttar Pradesh",
+                    "citation": "(2014) 2 SCC 1",
+                    "court": "Supreme Court of India",
+                    "year": 2014,
+                    "bench": "5-Judge Constitutional Bench (P. Sathasivam C.J. et al.)",
+                    "subject": "Mandatory Registration of First Information Report (FIR)",
+                    "sections_invoked": "CrPC S. 154 (BNSS S. 173)",
+                    "ratio_decidendi": "Registration of FIR is mandatory under Section 154 of CrPC if information discloses commission of a cognizable offence; no preliminary inquiry is permissible in such cases.",
+                    "facts_summary": "Habeas corpus petition by father whose minor daughter was kidnapped, where police officer refused to register FIR without monetary bribe."
+                },
+                {
+                    "title": "D.K. Basu v. State of West Bengal",
+                    "citation": "(1997) 1 SCC 416",
+                    "court": "Supreme Court of India",
+                    "year": 1997,
+                    "bench": "2-Judge Bench (Kuldip Singh, A.S. Anand JJ.)",
+                    "subject": "Custodial Torture & Arrestee Rights",
+                    "sections_invoked": "Constitution of India Art. 21, Art. 22; CrPC S. 50, 54, 57",
+                    "ratio_decidendi": "Laid down 11 mandatory procedural safeguards for arrest and detention, including clear name tags for arresting personnel, arrest memo, mandatory medical examination, and informing relative within 8-12 hours.",
+                    "facts_summary": "Public interest litigation addressing pervasive deaths and torture in police custody across states."
+                },
+                {
+                    "title": "Satender Kumar Antil v. Central Bureau of Investigation",
+                    "citation": "(2022) 10 SCC 51",
+                    "court": "Supreme Court of India",
+                    "year": 2022,
+                    "bench": "2-Judge Bench (S.K. Kaul, M.M. Sundresh JJ.)",
+                    "subject": "Bail Jurisprudence & De-congestion of Under-trial Prisons",
+                    "sections_invoked": "CrPC S. 41, 41A, 88, 170, 437, 439 (BNSS S. 35, 480, 483)",
+                    "ratio_decidendi": "Comprehensive categorization of offences into Category A, B, C, D with specific bail guidelines; reiterated that bail is the rule and jail is the exception; bail applications to be decided within 2 weeks.",
+                    "facts_summary": "Directions on process for surrender, non-bailable warrants, and expeditious disposal of bail matters where accused was not arrested during investigation."
+                },
+                {
+                    "title": "Navtej Singh Johar v. Union of India",
+                    "citation": "(2018) 10 SCC 1",
+                    "court": "Supreme Court of India",
+                    "year": 2018,
+                    "bench": "5-Judge Constitutional Bench (Dipak Misra C.J. et al.)",
+                    "subject": "Decriminalization of Consensual Adult LGBTQ Relationships",
+                    "sections_invoked": "IPC S. 377; Constitution of India Art. 14, 15, 19, 21",
+                    "ratio_decidendi": "Section 377 IPC unconstitutional insofar as it penalizes consensual sexual intercourse between competent consenting adults; constitutional morality prevails over majoritarian social prejudice.",
+                    "facts_summary": "Writ petitions by members of the LGBTQ+ community asserting denial of fundamental dignity and personal autonomy."
+                },
+                {
+                    "title": "Shreya Singhal v. Union of India",
+                    "citation": "(2015) 5 SCC 1",
+                    "court": "Supreme Court of India",
+                    "year": 2015,
+                    "bench": "2-Judge Bench (J. Chelameswar, R.F. Nariman JJ.)",
+                    "subject": "Free Speech on the Internet & Vague Penal Provisions",
+                    "sections_invoked": "Information Technology Act 2000 S. 66A, 69A, 79; Constitution Art. 19(1)(a), 19(2)",
+                    "ratio_decidendi": "Section 66A IT Act struck down entirely for being unconstitutionally vague, overbroad, and creating an impermissible chilling effect on legitimate online speech.",
+                    "facts_summary": "Petitions filed after citizens were arrested for posting innocuous political opinions on social networking sites."
+                },
+                {
+                    "title": "Bachan Singh v. State of Punjab",
+                    "citation": "(1980) 2 SCC 684",
+                    "court": "Supreme Court of India",
+                    "year": 1980,
+                    "bench": "5-Judge Constitutional Bench (Y.V. Chandrachud C.J. et al.)",
+                    "subject": "Capital Punishment & Rarest of Rare Doctrine",
+                    "sections_invoked": "IPC S. 302 (BNS S. 101); CrPC S. 354(3); Constitution Art. 21",
+                    "ratio_decidendi": "Death penalty should only be awarded in the rarest of rare cases where the alternative option of life imprisonment is unquestionably foreclosed, after balancing aggravating and mitigating circumstances.",
+                    "facts_summary": "Constitutional validity challenge to Section 302 IPC capital sentence provisions under Article 19 and 21."
+                }
+            ]
+            for p in precedents_seed:
+                db.add(LandmarkPrecedent(**p))
             db.commit()
 
         # Seed admin

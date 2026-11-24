@@ -1,5 +1,7 @@
 import os
 import math
+import json
+import sqlite3
 import collections
 from typing import List, Dict, Any, Optional
 import chromadb
@@ -8,6 +10,106 @@ from aegis_backend.database import AEGIS_DIR
 
 CHROMA_DIR = os.path.join(AEGIS_DIR, "chroma")
 os.makedirs(CHROMA_DIR, exist_ok=True)
+FTS_DB_PATH = os.path.join(AEGIS_DIR, "legal_fts.db")
+
+class SqliteFTS5Store:
+    """Persistent, 100% offline, zero-RAM-overhead Full-Text Search (BM25) using SQLite FTS5."""
+    def __init__(self, db_path: str = FTS_DB_PATH):
+        self.db_path = db_path
+        self._init_db()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+
+    def _init_db(self):
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS legal_fts USING fts5(
+                    chunk_id UNINDEXED,
+                    document_id UNINDEXED,
+                    metadata_json UNINDEXED,
+                    content,
+                    tokenize='porter unicode61'
+                );
+            """)
+            conn.commit()
+
+    def add_chunks(self, chunks: List[Dict[str, Any]]):
+        if not chunks:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for c in chunks:
+                chunk_id = c["id"]
+                content = c["content"]
+                meta = c.get("metadata", {})
+                doc_id = meta.get("document_id", 0)
+                meta_json = json.dumps(meta)
+                # Remove existing chunk if already present
+                cursor.execute("DELETE FROM legal_fts WHERE chunk_id = ?", (chunk_id,))
+                cursor.execute(
+                    "INSERT INTO legal_fts(chunk_id, document_id, metadata_json, content) VALUES (?, ?, ?, ?)",
+                    (chunk_id, str(doc_id), meta_json, content)
+                )
+            conn.commit()
+
+    def delete_document(self, document_id: int):
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM legal_fts WHERE document_id = ?", (str(document_id),))
+            conn.commit()
+
+    def clear(self):
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM legal_fts;")
+            conn.commit()
+
+    def search(self, query: str, limit: int = 30, document_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+        # Clean query for FTS5 syntax
+        clean_terms = []
+        for word in query.split():
+            clean = "".join(ch for ch in word if ch.isalnum())
+            if clean:
+                clean_terms.append(f'"{clean}"')
+        
+        if not clean_terms:
+            return []
+            
+        fts_query = " OR ".join(clean_terms)
+        
+        params: List[Any] = [fts_query]
+        sql = "SELECT chunk_id, document_id, metadata_json, content, bm25(legal_fts) as rank FROM legal_fts WHERE legal_fts MATCH ?"
+        
+        if document_ids:
+            placeholders = ",".join("?" for _ in document_ids)
+            sql += f" AND document_id IN ({placeholders})"
+            params.extend(str(d) for d in document_ids)
+            
+        sql += " ORDER BY rank LIMIT ?"
+        params.append(limit)
+        
+        results = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(sql, params)
+                for row in cursor.fetchall():
+                    chunk_id, doc_id, meta_json, content, rank = row
+                    try:
+                        meta = json.loads(meta_json)
+                    except Exception:
+                        meta = {}
+                    results.append({
+                        "id": chunk_id,
+                        "content": content,
+                        "metadata": meta,
+                        "bm25_score": abs(rank)
+                    })
+        except Exception:
+            pass
+        return results
 
 class LocalBM25Indexer:
     """Lightweight, 100% offline BM25 ranker for lexical search matching."""
@@ -83,6 +185,7 @@ class LocalVectorStore:
     def __init__(self):
         self.client = chromadb.PersistentClient(path=CHROMA_DIR)
         self.embedding_function = ONNXMiniLM_L6_V2()
+        self.fts = SqliteFTS5Store()
         try:
             self._collection = self.client.get_or_create_collection(
                 name="aegis_knowledge_base",
@@ -174,7 +277,7 @@ class LocalVectorStore:
 
     def add_chunks(self, chunks: List[Dict[str, Any]]):
         """
-        Add legal chunks to ChromaDB.
+        Add legal chunks to ChromaDB and disk-backed SQLite FTS5 index.
         Expects list of dicts: { "id": str, "content": str, "metadata": dict }
         """
         ids = [c["id"] for c in chunks]
@@ -187,6 +290,11 @@ class LocalVectorStore:
             documents=documents,
             metadatas=metadatas
         )
+        try:
+            self.fts.add_chunks(chunks)
+        except Exception as e:
+            import logging
+            logging.getLogger("aegis_ai.vector_store").warning(f"Failed to index into FTS5: {e}")
         self._bm25_cache.clear()
         self._warm_up_bm25_cache()
 
@@ -195,6 +303,10 @@ class LocalVectorStore:
         self.collection.delete(
             where={"document_id": document_id}
         )
+        try:
+            self.fts.delete_document(document_id)
+        except Exception:
+            pass
         self._bm25_cache.clear()
         self._warm_up_bm25_cache()
 
@@ -240,7 +352,46 @@ class LocalVectorStore:
         # 2. Retrieve candidates for vector search (fetch top 30)
         vector_results = self.query_similarity(query, limit=30, document_ids=document_ids)
 
-        # 3. Retrieve or lookup BM25 Lexical Index from cache
+        # 3. Fast-path: Retrieve Lexical BM25 ranking from disk-backed SQLite FTS5
+        fts_results = []
+        try:
+            fts_results = self.fts.search(query, limit=30, document_ids=document_ids)
+        except Exception:
+            fts_results = []
+
+        if fts_results:
+            rrf_scores = collections.defaultdict(float)
+            active_candidates = {}
+
+            for rank, res in enumerate(vector_results, start=1):
+                doc_id = res["id"]
+                rrf_scores[doc_id] += 1.0 / (60.0 + rank)
+                active_candidates[doc_id] = {
+                    "id": doc_id,
+                    "content": res["content"],
+                    "metadata": res["metadata"]
+                }
+
+            for rank, res in enumerate(fts_results, start=1):
+                doc_id = res["id"]
+                rrf_scores[doc_id] += 1.0 / (60.0 + rank)
+                if doc_id not in active_candidates:
+                    active_candidates[doc_id] = {
+                        "id": doc_id,
+                        "content": res["content"],
+                        "metadata": res["metadata"]
+                    }
+
+            sorted_ids = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
+            fused_output = []
+            for doc_id, rrf_score in sorted_ids[:limit * 3]:
+                item = active_candidates[doc_id].copy()
+                item["rrf_score"] = rrf_score
+                fused_output.append(item)
+
+            return self._rerank_with_cross_encoder(query, fused_output, limit)
+
+        # 4. Fallback: Retrieve or lookup in-memory BM25 Lexical Index if FTS5 had no matches
         cache_key = frozenset(document_ids) if document_ids else "all"
         
         if cache_key in self._bm25_cache:
@@ -397,6 +548,10 @@ class LocalVectorStore:
                 metadata={"hnsw:space": "cosine"},
                 embedding_function=self.embedding_function
             )
+            try:
+                self.fts.clear()
+            except Exception:
+                pass
             self._bm25_cache.clear()
             self._warm_up_bm25_cache()
         except Exception as e:

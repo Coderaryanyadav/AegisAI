@@ -24,7 +24,7 @@ class ResearchService:
         encoder = tiktoken.get_encoding("cl100k_base")
         context = ""
         total_tokens = 0
-        max_tokens = 6000  # Safe context buffer for local models (approx 8000 tokens)
+        max_tokens = int(os.environ.get("AEGIS_MAX_CONTEXT_TOKENS", "16000"))
         for idx, c in enumerate(safe_chunks):
             filename = c["metadata"].get("filename", "Unknown Document")
             chunk_content = c["content"]
