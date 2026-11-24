@@ -284,6 +284,8 @@ export function ResearchTab({
             showNotification={showNotification}
           />
           <StatutoryHelper
+            API_BASE={API_BASE}
+            fetchWithAuth={fetchWithAuth}
             helperAct={helperAct}
             setHelperAct={setHelperAct}
             helperSection={helperSection}

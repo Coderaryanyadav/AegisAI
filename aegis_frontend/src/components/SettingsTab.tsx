@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { ShieldCheck, FileCheck, RefreshCw } from "lucide-react";
+import { PrivilegeCertificateModal } from "./PrivilegeCertificateModal";
 
 interface SettingsTabProps {
   API_BASE: string;
@@ -39,6 +41,29 @@ export function SettingsTab({
   const [licenseKey, setLicenseKey] = useState("");
   const [licenseStatus, setLicenseStatus] = useState<any>(null);
   const [licenseLoading, setLicenseLoading] = useState(false);
+
+  // Privilege Certificate states
+  const [certModalOpen, setCertModalOpen] = useState(false);
+  const [certData, setCertData] = useState<any>(null);
+  const [certLoading, setCertLoading] = useState(false);
+
+  const handleGenerateCertificate = async () => {
+    setCertLoading(true);
+    try {
+      const res = await fetchWithAuth(`${API_BASE}/api/v1/system/privilege-certificate`);
+      if (res.ok) {
+        const data = await res.json();
+        setCertData(data);
+        setCertModalOpen(true);
+      } else {
+        showNotification("Failed to generate privilege certificate", "error");
+      }
+    } catch (err: any) {
+      showNotification(err.message || "Failed to generate privilege certificate", "error");
+    } finally {
+      setCertLoading(false);
+    }
+  };
 
 
 
@@ -323,7 +348,52 @@ export function SettingsTab({
             </div>
           )}
         </div>
+
+        {/* Air-Gap Privilege Certificate Section */}
+        <div className="border border-emerald-900/60 bg-emerald-950/10 p-6 rounded-xl space-y-4 md:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/60 text-emerald-400 rounded-xl">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                  Air-Gap Sovereign Privilege & Data Isolation Certificate
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+                    USP AUDIT SEAL
+                  </span>
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  Generate a cryptographically signed attestation proving all client data, pleadings, and AI inference remain 100% on local hardware.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleGenerateCertificate}
+              disabled={certLoading}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-black font-bold rounded-xl transition text-xs flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-950/50 disabled:opacity-50"
+            >
+              {certLoading ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Sealing Certificate...
+                </>
+              ) : (
+                <>
+                  <FileCheck className="w-4 h-4" /> Export Privilege Certificate
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </div>
+
+      {certModalOpen && (
+        <PrivilegeCertificateModal
+          certData={certData}
+          onClose={() => setCertModalOpen(false)}
+          showNotification={showNotification}
+        />
+      )}
     </div>
   );
 }

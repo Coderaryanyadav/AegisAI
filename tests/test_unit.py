@@ -740,3 +740,89 @@ def test_crm_entity_graph_api():
         db.commit()
         db.close()
 
+def test_statute_crosswalk_service_and_api():
+    from aegis_backend.services.statute_crosswalk import StatuteCrosswalkService
+    from fastapi.testclient import TestClient
+    from aegis_backend.main import app
+    from aegis_backend.database import SessionLocal, User
+    from aegis_backend.core.security import create_access_token
+
+    # 1. Test direct service search
+    res_murder = StatuteCrosswalkService.search("302")
+    assert len(res_murder) >= 1
+    assert res_murder[0]["old_act"] == "IPC"
+    assert "BNS" in res_murder[0]["new_act"]
+    assert "103" in res_murder[0]["new_section"]
+
+    res_bail = StatuteCrosswalkService.search("438")
+    assert any(r["old_section"] == "438" and "482" in r["new_section"] for r in res_bail)
+
+    res_iea = StatuteCrosswalkService.search("65B")
+    assert any("63" in r["new_section"] for r in res_iea)
+
+    # 2. Test HTTP endpoint
+    client = TestClient(app)
+    db = SessionLocal()
+    user = db.query(User).filter(User.email == "test_lawyer@legalai.local").first()
+    token = create_access_token({"sub": user.email})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    api_res = client.get("/api/v1/research/crosswalk?query=cheating", headers=headers)
+    assert api_res.status_code == 200
+    items = api_res.json()
+    assert any("420" in i["old_section"] or "318" in i["new_section"] for i in items)
+    db.close()
+
+def test_chronology_service_extraction_and_contradictions():
+    from aegis_backend.services.chronology_service import ChronologyService
+
+    sample_evidence = (
+        "On 12/05/2023, the Complainant stated that payment of Rs 50,00,000 was transferred.\n"
+        "However, on 12/05/2023, the Accused alleged he was traveling out of state and never received funds.\n"
+        "Subsequently on 18/06/2023, the Investigating Officer recorded a formal seizure memo."
+    )
+
+    events = ChronologyService.extract_events_from_text(sample_evidence, source_doc="FIR_ChargeSheet.pdf")
+    assert len(events) >= 2
+    assert any("12/05/2023" in e["date"] for e in events)
+
+    # Test contradiction finder with divergent source accounts
+    doc_a_events = ChronologyService.extract_events_from_text("On 10/01/2024, Witness stated meeting occurred at 10:00 AM.", source_doc="Witness_Statement_A.pdf")
+    doc_b_events = ChronologyService.extract_events_from_text("On 10/01/2024, Bank statement proves branch was closed all day.", source_doc="Bank_Audit.pdf")
+    combined = doc_a_events + doc_b_events
+
+    contradictions = ChronologyService.identify_contradictions(combined)
+    assert len(contradictions) >= 1
+    assert contradictions[0]["severity"] == "HIGH"
+    assert "Discrepancy on 10/01/2024" in contradictions[0]["topic"]
+
+def test_privilege_certificate_api():
+    from fastapi.testclient import TestClient
+    from aegis_backend.main import app
+    from aegis_backend.database import SessionLocal, User
+    from aegis_backend.core.security import create_access_token, SECRET_KEY
+    import hmac, hashlib, json
+
+    client = TestClient(app)
+    db = SessionLocal()
+    user = db.query(User).filter(User.email == "test_lawyer@legalai.local").first()
+    token = create_access_token({"sub": user.email})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.get("/api/v1/system/privilege-certificate", headers=headers)
+    assert res.status_code == 200
+    cert = res.json()
+
+    assert "certificate_id" in cert
+    assert cert["certificate_id"].startswith("PRIV-")
+    assert cert["licensed_advocate"] == user.email
+    assert "AIR-GAPPED" in cert["inference_isolation"]["external_egress_traffic"]
+    assert "cryptographic_signature" in cert
+
+    # Verify signature matches payload
+    sig = cert["cryptographic_signature"]
+    payload_without_sig = {k: v for k, v in cert.items() if k != "cryptographic_signature"}
+    expected_sig = hmac.new(SECRET_KEY.encode(), json.dumps(payload_without_sig, sort_keys=True).encode(), hashlib.sha256).hexdigest()
+    assert sig == expected_sig
+    db.close()
+

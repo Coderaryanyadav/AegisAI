@@ -582,3 +582,13 @@ async def transcribe_audio(req: VoiceTranscribeRequest, current_user: User = Dep
 @router.get("/whatsapp/reminder/{schedule_id}")
 async def generate_whatsapp_reminder(schedule_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     return await ResearchService.generate_whatsapp_reminder(db, schedule_id)
+
+@router.get("/research/crosswalk")
+async def get_statute_crosswalk(
+    query: str = "",
+    category: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Dual-Statute Sanhitas Cross-Walker: IPC <-> BNS, CrPC <-> BNSS, IEA <-> BSA."""
+    from aegis_backend.services.statute_crosswalk import StatuteCrosswalkService
+    return StatuteCrosswalkService.search(query=query, category=category)

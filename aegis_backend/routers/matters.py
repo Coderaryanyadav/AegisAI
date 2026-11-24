@@ -200,3 +200,28 @@ async def check_legal_conflict(req: ConflictCheckRequest, db: AsyncSession = Dep
 
     return result
 
+@router.post("/matters/{id}/chronology")
+async def generate_matter_chronology(
+    id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Extracts chronological evidentiary timeline and contradiction impeachment matrix for a matter."""
+    from aegis_backend.services.chronology_service import ChronologyService
+    from aegis_backend.database import Document
+    
+    docs = (await db.execute(select(Document).filter(Document.matter_id == id))).scalars().all()
+    all_events = []
+    for doc in docs:
+        if doc.content_text:
+            events = ChronologyService.extract_events_from_text(doc.content_text, source_doc=doc.filename)
+            all_events.extend(events)
+            
+    contradictions = ChronologyService.identify_contradictions(all_events)
+    return {
+        "matter_id": id,
+        "events_count": len(all_events),
+        "events": all_events,
+        "contradictions": contradictions
+    }
+
