@@ -62,6 +62,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   
   const activeTab = useAppStore(state => state.activeTab);
   const setActiveTab = useAppStore(state => state.setActiveTab);
+  const selectedModel = useAppStore(state => state.selectedModel);
+  const setSelectedModel = useAppStore(state => state.setSelectedModel);
 
   // Local Auth State
   const [mounted, setMounted] = useState(false);
@@ -233,12 +235,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Render consistent initial shell until mounted to eliminate SSR hydration mismatch
   if (!mounted) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#030303] text-zinc-500 font-mono text-xs">
-        <div className="flex flex-col items-center gap-3">
-          <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-2xl animate-pulse">
+      <div 
+        className="min-h-screen flex items-center justify-center bg-[#030303] text-zinc-500 font-mono text-xs"
+        suppressHydrationWarning
+      >
+        <div className="flex flex-col items-center gap-3" suppressHydrationWarning>
+          <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-2xl animate-pulse" suppressHydrationWarning>
             <Shield className="w-6 h-6 text-zinc-400" />
           </div>
-          <span className="tracking-widest uppercase text-[10px]">Initializing AegisAI Offline Vault...</span>
+          <span className="tracking-widest uppercase text-[10px]" suppressHydrationWarning>Initializing AegisAI Offline Vault...</span>
         </div>
       </div>
     );
@@ -263,7 +268,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#030303] text-zinc-100 font-sans">
+    <div className="min-h-screen flex flex-col bg-[#030303] text-zinc-100 font-sans" suppressHydrationWarning>
       <TitleBar />
       {/* Top Banner Navigation */}
       <header className="h-16 border-b border-zinc-900/80 glass-panel px-6 flex items-center justify-between z-20 sticky top-0 bg-black/50 backdrop-blur-md">
@@ -582,8 +587,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="p-3.5 border border-zinc-900 bg-zinc-950/60 rounded-xl space-y-2.5 mt-4">
             <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block font-mono">Active Inference Model</span>
             <select 
-              value={useAppStore(state => state.selectedModel)}
-              onChange={(e) => useAppStore.getState().setSelectedModel(e.target.value)}
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
               className="w-full p-2 text-xs rounded-lg glass-input text-zinc-300 focus:border-zinc-650 bg-zinc-950 border border-zinc-900 outline-none"
             >
               {systemStatus?.models_available?.length > 0 ? (
